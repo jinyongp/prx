@@ -1,0 +1,47 @@
+version: "2"
+
+# Explicit enable only. `default: none` keeps opinionated/noisy linters out so
+# automated fixes stay predictable. Add linters deliberately, not via `all`.
+linters:
+  default: none
+  enable:
+    - govet
+    - staticcheck
+    - errcheck
+    - ineffassign
+    - unused
+    - errorlint
+    - nilnil
+    - bodyclose
+    - contextcheck
+    - exhaustive
+    - gocritic
+    - revive
+    - unparam
+    - nolintlint
+    - gosec # prx security surface: os/exec, file perms 0600, /etc/hosts, sudo
+
+  settings:
+    nolintlint:
+      require-explanation: true
+      require-specific: true
+    # Start revive light — enable rules incrementally so code stays idiomatic
+    # rather than "rule-satisfying".
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: error-return
+        - name: error-strings
+        - name: errorf
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: var-declaration
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+run:
+  timeout: 5m
+  relative-path-mode: gomod
