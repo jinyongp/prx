@@ -35,8 +35,12 @@ linters:
     gosec:
       # G304: prx legitimately reads files by user-provided paths (config,
       # registry, certs). Keep the file/dir permission checks (G301/G302/G306).
+      # G705/G710: taint-analysis rules that false-positive on a reverse proxy
+      # (echoing the Host header, redirecting http→https on the same host).
       excludes:
         - G304
+        - G705
+        - G710
     nolintlint:
       require-explanation: true
       require-specific: true
@@ -45,6 +49,16 @@ linters:
   exclusions:
     paths:
       - internal/truststore
+    rules:
+      # Test code legitimately triggers these; keep them on for real code.
+      - path: _test\.go
+        linters:
+          - unparam
+          - contextcheck
+      - path: _test\.go
+        text: "unused-parameter"
+        linters:
+          - revive
     # Start revive light — enable rules incrementally so code stays idiomatic
     # rather than "rule-satisfying".
     revive:
