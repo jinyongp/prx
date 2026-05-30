@@ -40,6 +40,11 @@ linters:
     nolintlint:
       require-explanation: true
       require-specific: true
+
+  # Vendored upstream code is not held to prx's lint rules.
+  exclusions:
+    paths:
+      - internal/truststore
     # Start revive light — enable rules incrementally so code stays idiomatic
     # rather than "rule-satisfying".
     revive:
