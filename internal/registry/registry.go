@@ -21,6 +21,7 @@ type Reservation struct {
 	TLS        string `json:"tls,omitempty"`
 	DNS        string `json:"dns,omitempty"`
 	Adhoc      bool   `json:"adhoc,omitempty"`
+	Active     bool   `json:"active,omitempty"`      // true while routed; reservation persists when false
 	ConfigPath string `json:"config_path,omitempty"` // prx.toml that owns this reservation; enables GC
 }
 

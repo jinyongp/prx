@@ -17,9 +17,9 @@ import (
 
 // Route maps an incoming host to a local upstream.
 type Route struct {
-	Domain   string
-	Upstream string // host:port, e.g. 127.0.0.1:4310
-	Exposed  bool   // if false, non-loopback clients are refused
+	Domain   string `json:"domain"`
+	Upstream string `json:"upstream"` // host:port, e.g. 127.0.0.1:4310
+	Exposed  bool   `json:"exposed"`  // if false, non-loopback clients are refused
 }
 
 // LiveFunc reports whether an upstream (host:port) is accepting connections.
@@ -77,6 +77,15 @@ func (s *Server) lookup(host string) *Route {
 		return nil
 	}
 	return (*m)[host]
+}
+
+// RouteCount returns the number of active routes.
+func (s *Server) RouteCount() int {
+	m := s.routes.Load()
+	if m == nil {
+		return 0
+	}
+	return len(*m)
 }
 
 // HTTPSHandler routes a decrypted request to its upstream.

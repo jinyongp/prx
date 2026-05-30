@@ -32,16 +32,22 @@ func liveness(p int) string {
 	return "down"
 }
 
-func currentProject() (*config.Project, error) {
+func currentProjectPath() (*config.Project, string, error) {
 	cwd, err := os.Getwd()
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	path, err := config.Discover(cwd)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
-	return config.Load(path)
+	p, err := config.Load(path)
+	return p, path, err
+}
+
+func currentProject() (*config.Project, error) {
+	p, _, err := currentProjectPath()
+	return p, err
 }
 
 // Ls prints all reservations with live/down status.

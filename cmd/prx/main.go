@@ -24,12 +24,16 @@ type command func(args []string, stdout, stderr io.Writer) int
 // commands is the subcommand dispatch table. Subcommands register here as
 // features land across the implementation phases.
 var commands = map[string]command{
-	"ls":    cli.Ls,
-	"port":  cli.Port,
-	"add":   cli.Add,
-	"rm":    cli.Rm,
-	"prune": cli.Prune,
-	"run":   cli.Run,
+	"up":      cli.Up,
+	"down":    cli.Down,
+	"ls":      cli.Ls,
+	"port":    cli.Port,
+	"add":     cli.Add,
+	"rm":      cli.Rm,
+	"prune":   cli.Prune,
+	"run":     cli.Run,
+	"daemon":  cli.Daemon,
+	"__serve": cli.Serve,
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
