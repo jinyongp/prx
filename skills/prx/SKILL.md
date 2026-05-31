@@ -1,13 +1,14 @@
 ---
 name: prx
-description: Drive the prx local HTTPS reverse proxy and port registry from the command line. Use when a repository has a prx.toml and you need to map domains to local dev servers over trusted HTTPS, allocate or look up ports without hardcoding them, start a dev server on its assigned port, or inspect the machine-wide registry. All commands accept --json for stable, parseable output.
+description: Drive the prx local HTTPS reverse proxy and port registry from the command line. Use when a repository has a prx.toml and you need to map domains to local dev servers over trusted HTTPS, allocate or look up ports without hardcoding them, start a dev server on its assigned port, or inspect the machine-wide registry. Commands that document --json emit stable, parseable output.
 ---
 
 # prx
 
 `prx` maps local domains to dev servers over trusted HTTPS and manages a
-machine-wide port registry. Every command writes data to stdout and logs to
-stderr; pass `--json` for a single JSON value (pipe-safe).
+machine-wide port registry. Commands write data to stdout and diagnostics to
+stderr. Commands marked `--json` emit a single JSON value on success; JSON-mode
+errors use a stderr envelope.
 
 ## When to use
 
@@ -19,19 +20,21 @@ stderr; pass `--json` for a single JSON value (pipe-safe).
 
 | command | purpose |
 | --- | --- |
+| `prx init [--json] [--name name] [--force]` | scaffold a starter `prx.toml` |
 | `prx up [--json] [--dns localhost\|hosts]` | reserve/allocate ports, reflect DNS, push routes |
 | `prx down [--json]` | deactivate this project's routes (reservations kept) |
 | `prx ls [--json]` | list reservations with live/down status |
-| `prx port <service>` | print the reserved port (for scripts) |
+| `prx port <service> [--json]` | print the reserved port (for scripts) |
 | `prx run <service> -- <cmd...>` | run a command with `PORT` injected |
-| `prx add <domain> <port>` | reserve a domain→port mapping |
-| `prx rm <domain>` | remove a reservation |
+| `prx add <domain> <port> [--json]` | reserve a domain→port mapping |
+| `prx rm <domain> [--json]` | remove a reservation |
 | `prx prune [--json]` | GC reservations whose prx.toml is gone |
-| `prx daemon start\|stop\|status` | manage the resident proxy |
+| `prx daemon start\|stop\|status [--json]\|logs` | manage the resident proxy; `--json` is for `status` |
 | `prx trust` | install the root CA (one time) |
 | `prx ca export [--out path]` | export the root CA for other devices |
-| `prx expose <service> --via <provider> [--auth user:pass]` | reach a service externally |
-| `prx skill path` | print the path of this skill file |
+| `prx expose <service> --via <provider> [--auth user:pass] [--json]` | reach a service externally |
+| `prx upgrade [--yes]` | upgrade to the latest GitHub release |
+| `prx skill path\|print` | locate or print this skill file |
 
 ## Exit codes
 
@@ -58,6 +61,12 @@ Inspect mappings as JSON:
 prx ls --json
 ```
 
+JSON-mode errors are written to stderr:
+
+```json
+{"error":{"code":"port_conflict","message":"port 4310 already reserved by myapp/web"}}
+```
+
 ## prx.toml
 
 ```toml
@@ -72,5 +81,6 @@ domain = "api.example.com"
 port = 3001                      # fixed when needed
 ```
 
-`prx add`/`prx rm` edit this file in place, preserving comments. Domains ending
+Inside a project, `prx add`/`prx rm` edit this file in place, preserving comments.
+Outside a project they create/remove adhoc registry reservations. Domains ending
 in `.localhost` need no sudo; custom domains use `/etc/hosts` (sudo).

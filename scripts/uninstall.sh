@@ -70,22 +70,14 @@ collect_paths() {
     printf '%s\n' "$st_dir" >> "$WORKFILE"
   fi
 
-  if command -v which >/dev/null 2>&1; then
-    which -a prx 2>/dev/null | sed '/^$/d' >> "$WORKFILE" || true
+  if [ -n "${PRX_BIN_DIR:-}" ] && { [ -f "${PRX_BIN_DIR}/prx" ] || [ -L "${PRX_BIN_DIR}/prx" ]; }; then
+    printf '%s\n' "${PRX_BIN_DIR}/prx" >> "$WORKFILE"
   fi
-  command -v prx 2>/dev/null | awk '/\// {print $NF}' >> "$WORKFILE" || true
-
-  if [ -n "${PATH:-}" ]; then
-    IFS_BACKUP="$IFS"
-    IFS=":"
-    for dir in $PATH; do
-      if [ -n "$dir" ]; then
-        if [ -f "$dir/prx" ] || [ -L "$dir/prx" ]; then
-          printf "%s\n" "$dir/prx" >> "$WORKFILE"
-        fi
-      fi
-    done
-    IFS="$IFS_BACKUP"
+  if [ -f "${HOME_DIR}/.local/bin/prx" ] || [ -L "${HOME_DIR}/.local/bin/prx" ]; then
+    printf '%s\n' "${HOME_DIR}/.local/bin/prx" >> "$WORKFILE"
+  fi
+  if [ -f "/usr/local/bin/prx" ] || [ -L "/usr/local/bin/prx" ]; then
+    printf '%s\n' "/usr/local/bin/prx" >> "$WORKFILE"
   fi
 }
 
@@ -122,6 +114,14 @@ stop_daemon() {
     return
   fi
   if kill -0 "$PID" 2>/dev/null; then
+    args="$(ps -p "$PID" -o args= 2>/dev/null || true)"
+    case "$args" in
+      prx\ __serve*|*/prx\ __serve*) ;;
+      *)
+        echo "Skipping daemon stop for stale/non-prx pid: $PID" >&2
+        return
+        ;;
+    esac
     kill "$PID" 2>/dev/null || true
   fi
 }

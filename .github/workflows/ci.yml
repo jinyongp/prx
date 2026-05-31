@@ -3,6 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
@@ -30,9 +31,17 @@ jobs:
         with:
           version: v2.12.2
       - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...
+      - name: scripts
         run: |
-          go install golang.org/x/vuln/cmd/govulncheck@v1.3.0
-          govulncheck ./...
+          sh -n scripts/install.sh scripts/install-with-agent.sh scripts/uninstall.sh scripts/build-prx.sh
+          bash -n scripts/release-publish.sh
+          if command -v shellcheck >/dev/null 2>&1; then
+            shellcheck -S warning scripts/*.sh
+          fi
+          if command -v shfmt >/dev/null 2>&1; then
+            shfmt -d scripts/*.sh
+          fi
       - name: test
         run: go test -race -cover ./...
 
@@ -40,7 +49,7 @@ jobs:
     needs: [check]
     if: |
       github.event_name == 'push' &&
-      github.ref == 'refs/heads/main' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')) &&
       needs.check.result == 'success'
     runs-on: ubuntu-latest
     permissions:
@@ -53,9 +62,18 @@ jobs:
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version: "1.26"
+      - name: detect release tag
+        id: release_tag
+        run: |
+          TAG="$(git tag --points-at HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
       - name: build
         run: |
-          ./scripts/build-prx.sh "${{ github.ref_name }}"
+          VERSION="${{ steps.release_tag.outputs.tag }}"
+          if [ -z "$VERSION" ]; then
+            VERSION="$(git describe --tags --always --dirty)"
+          fi
+          ./scripts/build-prx.sh "$VERSION"
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: prx-${{ github.sha }}
@@ -64,11 +82,6 @@ jobs:
             prx-darwin-arm64
             prx-linux-amd64
             prx-linux-arm64
-      - name: detect release tag
-        id: release_tag
-        run: |
-          TAG="$(git tag --points-at HEAD --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1 || true)"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
       - name: checksums
         if: steps.release_tag.outputs.tag != ''
         run: |

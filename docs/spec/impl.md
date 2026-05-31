@@ -11,7 +11,7 @@
 - **언어:** Go (stdlib 중심). 빌드 타깃 macOS(arm64/amd64)·Linux. Windows 미지원.
 - **의존 정책 (2계층, README §4 보강):**
   - **core** (프록시·TLS·CA·ACME·네트워크·보안): stdlib + `golang.org/x`만. 트러스트 스토어 등록은 `smallstep/truststore`(Apache-2.0)를 **`internal/truststore`로 vendoring** 하여 사용 — upstream 모듈 의존 0. **vendored 패키지는 prx 코드를 import하지 않는다(도메인 분리, 자립 라이브러리).** prx 고유 동작(보안 하더닝·로깅)은 제네릭 시드(seam)로 바깥에서 주입한다.
-  - **presentation** (CLI 출력·테이블·색·로그): **직접 구현.** TTY 감지 + 수동 ANSI. 데이터/`--json` 경로 불간섭.
+  - **presentation** (CLI 출력·테이블·색·로그): 승인된 Charm 스택(lipgloss 등) 사용 가능. 데이터/`--json` 경로 불간섭.
 - **불변식:**
   - `--json`·파이프 출력에는 색·로그·부가 텍스트 금지(파이프 안전).
   - core 코드는 presentation에 의존하지 않는다(단방향).

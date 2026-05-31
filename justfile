@@ -1,6 +1,9 @@
 # Command runner is `just` (install: https://github.com/casey/just).
 set quiet
 
+export GOCACHE := "/tmp/prx-gocache"
+export GOLANGCI_LINT_CACHE := "/tmp/prx-golangci-cache"
+
 [private]
 default:
   @just --list
@@ -21,6 +24,17 @@ test:
 cover:
   go test -race -cover ./...
 
+[doc('check gofmt without writing files')]
+fmt-check:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  unformatted="$(gofmt -l $(git ls-files '*.go' | grep -v '^internal/truststore/'))"
+  test -z "$unformatted" || { echo "unformatted: $unformatted"; exit 1; }
+
+[doc('go vet all packages')]
+vet:
+  go vet ./...
+
 [doc('lint (human-readable)')]
 lint:
   go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.12.2 run ./...
@@ -33,13 +47,26 @@ lint-json:
 vuln:
   go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...
 
+[doc('shell script syntax/lint smoke checks')]
+scripts-check:
+  #!/usr/bin/env bash
+  set -euo pipefail
+  sh -n scripts/install.sh scripts/install-with-agent.sh scripts/uninstall.sh scripts/build-prx.sh
+  bash -n scripts/release-publish.sh
+  if command -v shellcheck >/dev/null 2>&1; then
+    shellcheck -S warning scripts/*.sh
+  fi
+  if command -v shfmt >/dev/null 2>&1; then
+    shfmt -d scripts/*.sh
+  fi
+
 [doc('format with gofmt + goimports')]
 fmt:
   gofmt -w .
   go run golang.org/x/tools/cmd/goimports@latest -w .
 
 [doc('full gate — run before opening a PR')]
-check: test lint vuln
+check: fmt-check vet cover lint vuln scripts-check
 
 [doc('release a new version: no arg => interactive patch/minor/major; patch/minor/major -> bump from latest tag; explicit vX.Y.Z')]
 release tag="":

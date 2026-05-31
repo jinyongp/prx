@@ -65,13 +65,11 @@ resolve_download_url() {
 
   CHECKSUMS_URL="$(printf '%s\n' "$ASSET_URLS" | grep '/checksums.txt$' | head -n 1 || true)"
 
-  for attempt in "$BINARY_NAME" "${BINARY_NAME}.tar.gz" "${BINARY_NAME}.zip"; do
-    CANDIDATE="$(printf '%s\n' "$ASSET_URLS" | grep "/${attempt}$" | head -n 1 || true)"
-    if [ -n "$CANDIDATE" ]; then
-      DOWNLOAD_URL="$CANDIDATE"
-      return 0
-    fi
-  done
+  CANDIDATE="$(printf '%s\n' "$ASSET_URLS" | grep "/${BINARY_NAME}$" | head -n 1 || true)"
+  if [ -n "$CANDIDATE" ]; then
+    DOWNLOAD_URL="$CANDIDATE"
+    return 0
+  fi
 
   return 1
 }
@@ -131,15 +129,15 @@ verify_checksum() {
 
   CHECKSUMS_FILE="${TMP_DIR}/checksums.txt"
   if ! curl -fsSL "$CHECKSUMS_URL" -o "$CHECKSUMS_FILE"; then
-    echo "Warning: failed to download checksums.txt; skipping integrity check." >&2
-    return 0
+    echo "Error: failed to download checksums.txt; refusing to install unverified binary." >&2
+    return 1
   fi
 
   asset_name="$(basename "$DOWNLOAD_URL")"
   expected="$(awk -v f="$asset_name" '$2 == f || $2 == "*"f {print $1; exit}' "$CHECKSUMS_FILE")"
   if [ -z "$expected" ]; then
-    echo "Warning: no checksum entry for ${asset_name}; skipping integrity check." >&2
-    return 0
+    echo "Error: no checksum entry for ${asset_name}; refusing to install unverified binary." >&2
+    return 1
   fi
 
   if command -v sha256sum >/dev/null 2>&1; then
@@ -147,8 +145,8 @@ verify_checksum() {
   elif command -v shasum >/dev/null 2>&1; then
     actual="$(shasum -a 256 "$BINARY_PATH" | awk '{print $1}')"
   else
-    echo "Warning: no sha256 tool found (sha256sum/shasum); skipping integrity check." >&2
-    return 0
+    echo "Error: no sha256 tool found (sha256sum/shasum); refusing to install unverified binary." >&2
+    return 1
   fi
 
   if [ "$actual" != "$expected" ]; then

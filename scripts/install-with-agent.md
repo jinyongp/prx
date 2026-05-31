@@ -22,7 +22,7 @@ fi
 
 - If `prx.toml` already exists, keep it and do not overwrite it.
 - If missing, inspect the project and infer the dev port:
-  - `package.json` scripts: `vite`/`next`/`nuxt` → `3000` (Vite is often `5173` when explicitly configured)
+  - `package.json` scripts: Vite → `5173`; Next/Nuxt → `3000`; explicit script/config port wins
   - `go.mod` projects → `8080` default
   - `docker-compose.yml`/`docker-compose.yaml` with mapped host port → use that port
   - fallback: `3000`
@@ -54,7 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/uninstall
 curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/uninstall.sh | sh -s -- -y
 ```
 
-This removes user-level `config`, `data`, and `state` directories plus detected `prx` binaries,
+This removes user-level `config`, `data`, and `state` directories plus known installer target binaries,
 then tries to stop a running daemon if a pid file is found.
 Only paths actually present on the current machine are removed.
 System trust store entries are intentionally left behind.

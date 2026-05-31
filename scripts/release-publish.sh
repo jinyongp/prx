@@ -38,6 +38,12 @@ get_latest_tag() {
   git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1
 }
 
+sync_tags() {
+  if git remote get-url origin >/dev/null 2>&1; then
+    git fetch --tags --prune origin
+  fi
+}
+
 semver_from_tag() {
   local tag="$1"
   local stripped="${tag#v}"
@@ -126,6 +132,11 @@ confirm_push() {
   esac
 }
 
+if ! sync_tags; then
+  echo "Failed to fetch tags from origin; aborting to avoid releasing from stale local tags."
+  exit 1
+fi
+
 if [ -z "$TAG_INPUT" ]; then
   LATEST_TAG="$(get_latest_tag)"
 
@@ -169,17 +180,17 @@ if [ -z "$TAG_INPUT" ]; then
 
     case "${REPLY:-1}" in
       1|patch)
-        TAG_INPUT=patch
+        TAG_INPUT="patch"
         PATCH_TAG="$PATCH_CANDIDATE"
         break
         ;;
       2|minor)
-        TAG_INPUT=minor
+        TAG_INPUT="minor"
         PATCH_TAG="$MINOR_CANDIDATE"
         break
         ;;
       3|major)
-        TAG_INPUT=major
+        TAG_INPUT="major"
         PATCH_TAG="$MAJOR_CANDIDATE"
         break
         ;;
@@ -263,5 +274,5 @@ fi
 
 RELEASE_NOTES="$(printf 'Release %s\n\n%s' "$PATCH_TAG" "$(format_commits "$RANGE" | sed 's/^/- /')")"
 git tag -a "$PATCH_TAG" -m "$RELEASE_NOTES" "$TARGET_SHA"
-git push --follow-tags
+git push --atomic origin HEAD:main "refs/tags/$PATCH_TAG:refs/tags/$PATCH_TAG"
 echo "Created and pushed tag $PATCH_TAG"
