@@ -42,14 +42,13 @@ trap cleanup EXIT
 BINARY_NAME="prx-${OS}-${ARCH}"
 BINARY_PATH="${TMP_DIR}/${BINARY_NAME}"
 DOWNLOAD_URL=""
+CHECKSUMS_URL=""
 
 resolve_download_url() {
   if [ "$VERSION" = "latest" ]; then
     API_URL="https://api.github.com/repos/${REPO}/releases/latest"
-    VERSION_LABEL="latest"
   else
     API_URL="https://api.github.com/repos/${REPO}/releases/tags/${VERSION}"
-    VERSION_LABEL="$VERSION"
   fi
 
   RELEASE_JSON="${TMP_DIR}/release.json"
@@ -59,11 +58,12 @@ resolve_download_url() {
   fi
 
   ASSET_URLS="$(sed -n 's/.*\"browser_download_url\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p' "$RELEASE_JSON")"
-  TAG_NAME="$(sed -n 's/.*\"tag_name\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p' "$RELEASE_JSON" | head -n 1)"
 
   if [ -z "$ASSET_URLS" ]; then
     return 1
   fi
+
+  CHECKSUMS_URL="$(printf '%s\n' "$ASSET_URLS" | grep '/checksums.txt$' | head -n 1 || true)"
 
   for attempt in "$BINARY_NAME" "${BINARY_NAME}.tar.gz" "${BINARY_NAME}.zip"; do
     CANDIDATE="$(printf '%s\n' "$ASSET_URLS" | grep "/${attempt}$" | head -n 1 || true)"
@@ -118,8 +118,49 @@ build_from_source() {
   return 0
 }
 
+verify_checksum() {
+  if [ -z "${CHECKSUMS_URL:-}" ]; then
+    echo "Warning: release has no checksums.txt; skipping integrity check." >&2
+    return 0
+  fi
+
+  CHECKSUMS_FILE="${TMP_DIR}/checksums.txt"
+  if ! curl -fsSL "$CHECKSUMS_URL" -o "$CHECKSUMS_FILE"; then
+    echo "Warning: failed to download checksums.txt; skipping integrity check." >&2
+    return 0
+  fi
+
+  asset_name="$(basename "$DOWNLOAD_URL")"
+  expected="$(awk -v f="$asset_name" '$2 == f || $2 == "*"f {print $1; exit}' "$CHECKSUMS_FILE")"
+  if [ -z "$expected" ]; then
+    echo "Warning: no checksum entry for ${asset_name}; skipping integrity check." >&2
+    return 0
+  fi
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    actual="$(sha256sum "$BINARY_PATH" | awk '{print $1}')"
+  elif command -v shasum >/dev/null 2>&1; then
+    actual="$(shasum -a 256 "$BINARY_PATH" | awk '{print $1}')"
+  else
+    echo "Warning: no sha256 tool found (sha256sum/shasum); skipping integrity check." >&2
+    return 0
+  fi
+
+  if [ "$actual" != "$expected" ]; then
+    echo "Checksum verification failed for ${asset_name}." >&2
+    echo "  expected: ${expected}" >&2
+    echo "  actual:   ${actual}" >&2
+    return 1
+  fi
+
+  echo "Verified checksum for ${asset_name}."
+  return 0
+}
+
 if resolve_download_url; then
-  if ! curl -fsSL "$DOWNLOAD_URL" -o "$BINARY_PATH"; then
+  if curl -fsSL "$DOWNLOAD_URL" -o "$BINARY_PATH"; then
+    verify_checksum
+  else
     build_from_source
   fi
 else
@@ -132,12 +173,16 @@ if [ ! -f "$BINARY_PATH" ]; then
 fi
 chmod +x "$BINARY_PATH"
 
-if [ -w /usr/local/bin ]; then
+if [ -n "${PRX_BIN_DIR:-}" ]; then
+  if ! mkdir -p "${PRX_BIN_DIR}" 2>/dev/null || [ ! -w "${PRX_BIN_DIR}" ]; then
+    echo "Error: PRX_BIN_DIR is set but not writable: ${PRX_BIN_DIR}" >&2
+    exit 1
+  fi
+  DEST_DIR="${PRX_BIN_DIR}"
+elif [ -w /usr/local/bin ]; then
   DEST_DIR="/usr/local/bin"
 elif [ -w "$HOME/.local/bin" ] || mkdir -p "$HOME/.local/bin"; then
   DEST_DIR="$HOME/.local/bin"
-elif [ -n "${PRX_BIN_DIR:-}" ] && [ -d "${PRX_BIN_DIR}" ] && [ -w "${PRX_BIN_DIR}" ]; then
-  DEST_DIR="${PRX_BIN_DIR}"
 else
   echo "Error: no writable install directory found." >&2
   echo "Grant permissions or use a custom destination in your shell manually." >&2
