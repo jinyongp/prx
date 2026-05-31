@@ -27,11 +27,6 @@ fi
 git push origin main
 
 VERSION="${TAG_INPUT#v}"
-MAJOR="${VERSION%%.*}"
-REST="${VERSION#*.}"
-MINOR="${REST%%.*}"
-MINOR_TAG="v${MAJOR}.${MINOR}"
-MAJOR_TAG="v${MAJOR}"
 PATCH_TAG="${TAG_INPUT}"
 TARGET_SHA="$(git rev-parse origin/main)"
 
@@ -46,11 +41,4 @@ if git ls-remote --exit-code --tags origin "refs/tags/$PATCH_TAG" >/dev/null 2>&
 fi
 
 git tag -a "$PATCH_TAG" -m "Release $PATCH_TAG" "$TARGET_SHA"
-for alias_tag in "$MINOR_TAG" "$MAJOR_TAG"; do
-  if git rev-parse -q --verify "refs/tags/$alias_tag" >/dev/null; then
-    git tag -d "$alias_tag"
-  fi
-  git tag -a "$alias_tag" -m "Release $alias_tag" "$TARGET_SHA"
-done
-
-git push origin "$PATCH_TAG" "$MINOR_TAG" "$MAJOR_TAG" --force
+git push origin "$PATCH_TAG"

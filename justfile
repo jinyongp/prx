@@ -1,4 +1,5 @@
 # Command runner is `just` (install: https://github.com/casey/just).
+set quiet
 
 [doc('list recipes')]
 default:
