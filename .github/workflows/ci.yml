@@ -11,6 +11,7 @@ permissions:
 
 jobs:
   check:
+    if: github.event_name != 'push' || github.ref_type != 'tag'
     strategy:
       matrix:
         os: [ubuntu-latest, macos-latest]
@@ -38,7 +39,11 @@ jobs:
         run: go test -race -cover ./...
 
   build:
-    needs: check
+    needs: [check]
+    if: |
+      github.event_name == 'push' &&
+      (github.ref_type == 'tag' || github.ref == 'refs/heads/main') &&
+      (github.ref_type == 'tag' || needs.check.result == 'success')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
