@@ -36,6 +36,7 @@ var commands = map[string]command{
 	"trust":   cli.Trust,
 	"ca":      cli.Ca,
 	"expose":  cli.Expose,
+	"skill":   cli.Skill,
 	"__serve": cli.Serve,
 }
 
