@@ -32,7 +32,7 @@ func Up(args []string, stdout, stderr io.Writer) int {
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	dnsMode := fs.String("dns", "", "force DNS mode: localhost|hosts")
 	if err := fs.Parse(args); err != nil {
-		return ExitUsage
+		return parseExit(err)
 	}
 
 	project, path, err := currentProjectPath()
@@ -109,7 +109,7 @@ func Down(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
-		return ExitUsage
+		return parseExit(err)
 	}
 	project, _, err := currentProjectPath()
 	if err != nil {

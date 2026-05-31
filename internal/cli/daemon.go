@@ -23,6 +23,9 @@ func pidPath() string { return filepath.Join(paths.ConfigDir(), "prx.pid") }
 
 // Daemon dispatches `prx daemon start|stop|status|logs`.
 func Daemon(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		return fail(stderr, false, ExitOK, "usage", "usage: prx daemon start|stop|status|logs")
+	}
 	if len(args) == 0 {
 		return fail(stderr, false, ExitUsage, "usage", "usage: prx daemon start|stop|status|logs")
 	}
@@ -46,7 +49,7 @@ func daemonStatus(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
-		return ExitUsage
+		return parseExit(err)
 	}
 	client := daemon.NewClient(paths.SocketPath())
 	st, err := client.Status()

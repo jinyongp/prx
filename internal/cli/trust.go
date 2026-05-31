@@ -18,7 +18,7 @@ func Trust(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("trust", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
-		return ExitUsage
+		return parseExit(err)
 	}
 	authority, err := ca.Load(paths.DataDir())
 	if err != nil {
@@ -36,6 +36,9 @@ func Trust(args []string, stdout, stderr io.Writer) int {
 
 // Ca dispatches `prx ca export`.
 func Ca(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		return fail(stderr, false, ExitOK, "usage", "usage: prx ca export [--out <path>]")
+	}
 	if len(args) == 0 || args[0] != "export" {
 		return fail(stderr, false, ExitUsage, "usage", "usage: prx ca export [--out <path>]")
 	}
@@ -43,7 +46,7 @@ func Ca(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	out := fs.String("out", "prx-root.crt", "output path")
 	if err := fs.Parse(args[1:]); err != nil {
-		return ExitUsage
+		return parseExit(err)
 	}
 	authority, err := ca.Load(paths.DataDir())
 	if err != nil {
@@ -65,7 +68,7 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 	auth := fs.String("auth", "", "require basic auth as user:pass")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
-		return ExitUsage
+		return parseExit(err)
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {

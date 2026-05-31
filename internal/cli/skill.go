@@ -19,7 +19,7 @@ func Skill(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("skill", flag.ContinueOnError)
 	fs.SetOutput(stderr)
 	if err := fs.Parse(args); err != nil {
-		return ExitUsage
+		return parseExit(err)
 	}
 	sub := "path"
 	if fs.NArg() > 0 {

@@ -3,6 +3,7 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -47,6 +48,9 @@ func run(args []string, stdout, stderr io.Writer) int {
 	showVersion := fs.Bool("version", false, "print version and exit")
 	fs.Usage = func() { usage(stderr) }
 	if err := fs.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return 0
+		}
 		return 2
 	}
 	if *showVersion {
@@ -56,8 +60,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 
 	rest := fs.Args()
 	if len(rest) == 0 {
-		usage(stderr)
-		return 2
+		usage(stdout)
+		return 0
 	}
 	cmd, ok := commands[rest[0]]
 	if !ok {
@@ -99,6 +103,8 @@ commands:
 	for _, c := range commandHelp {
 		fmt.Fprintf(tw, "  %s\t%s\n", c.name, c.summary)
 	}
-	tw.Flush()
+	if err := tw.Flush(); err != nil {
+		fmt.Fprintln(w, "prx: failed to render usage table", err)
+	}
 	fmt.Fprint(w, "\nRun 'prx <command> -h' for command-specific flags.\n")
 }

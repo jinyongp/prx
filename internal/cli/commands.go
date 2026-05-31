@@ -56,7 +56,7 @@ func Ls(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
-		return ExitUsage
+		return parseExit(err)
 	}
 
 	reg, err := registryStore().Read()
@@ -91,7 +91,7 @@ func Port(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
-		return ExitUsage
+		return parseExit(err)
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
@@ -126,7 +126,7 @@ func Add(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
-		return ExitUsage
+		return parseExit(err)
 	}
 	rest := fs.Args()
 	if len(rest) != 2 {
@@ -160,7 +160,7 @@ func Rm(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
-		return ExitUsage
+		return parseExit(err)
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
@@ -191,7 +191,7 @@ func Prune(args []string, stdout, stderr io.Writer) int {
 	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	if err := fs.Parse(args); err != nil {
-		return ExitUsage
+		return parseExit(err)
 	}
 	var removed []registry.Reservation
 	err := registryStore().Update(func(r *registry.Registry) error {
@@ -214,6 +214,10 @@ func Prune(args []string, stdout, stderr io.Writer) int {
 
 // Run executes `prx run <service> -- <cmd...>` with PORT injected.
 func Run(args []string, stdout, stderr io.Writer) int {
+	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
+		return fail(stderr, false, ExitOK, "usage", "usage: prx run <service> -- <cmd> [args]")
+	}
+
 	sep := indexOf(args, "--")
 	if len(args) < 1 || sep < 1 || sep+1 >= len(args) {
 		return fail(stderr, false, ExitUsage, "usage", "usage: prx run <service> -- <cmd> [args]")
