@@ -17,4 +17,5 @@ jinyongp
 nilnil
 nolintlint
 staticcheck
+taskwarrior
 unparam

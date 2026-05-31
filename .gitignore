@@ -1,4 +1,6 @@
 .temp
 .claude
 .DS_Store
-/bin/
+.taskwarrior
+
+bin
