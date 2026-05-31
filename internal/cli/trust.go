@@ -8,6 +8,7 @@ import (
 	"os"
 
 	"github.com/jinyongp/prx/internal/ca"
+	"github.com/jinyongp/prx/internal/daemon"
 	"github.com/jinyongp/prx/internal/expose"
 	"github.com/jinyongp/prx/internal/paths"
 )
@@ -90,6 +91,26 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, *jsonOut, ExitError, "expose_failed", err.Error())
 	}
+
+	// Mark the route exposed (so non-loopback clients are allowed) and apply
+	// optional auth, then hot-reload the daemon. Auth is session-scoped: it
+	// lives in the in-memory route table, not the persisted registry.
+	client := daemon.NewClient(paths.SocketPath())
+	if client.IsRunning() {
+		if reg, rerr := registryStore().Read(); rerr == nil {
+			routes := activeRoutes(reg)
+			for i := range routes {
+				if routes[i].Domain == service.Domain {
+					routes[i].Exposed = true
+					routes[i].Auth = *auth
+				}
+			}
+			if serr := client.SetRoutes(routes); serr != nil {
+				return fail(stderr, *jsonOut, ExitError, "reload_failed", serr.Error())
+			}
+		}
+	}
+
 	if *jsonOut {
 		return writeJSON(stdout, map[string]any{"service": svc, "provider": *via, "public_url": url, "target": service.Domain})
 	}

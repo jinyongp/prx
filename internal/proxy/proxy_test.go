@@ -121,6 +121,39 @@ func TestSSEStreams(t *testing.T) {
 	}
 }
 
+func TestRouteAuthEnforced(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer backend.Close()
+
+	s := New(nil, alwaysLive)
+	s.SetRoutes([]Route{{Domain: "app.localhost", Upstream: backend.Listener.Addr().String(), Auth: "user:secret"}})
+	fe := frontend(t, s)
+
+	// No credentials -> 401.
+	resp := get(t, fe, "app.localhost", "/")
+	body, _ := io.ReadAll(resp.Body)
+	_ = resp.Body.Close()
+	_ = body
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("no-creds status = %d, want 401", resp.StatusCode)
+	}
+
+	// Correct credentials -> proxied.
+	req, _ := http.NewRequest(http.MethodGet, fe.URL+"/", nil)
+	req.Host = "app.localhost"
+	req.SetBasicAuth("user", "secret")
+	resp2, err := fe.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = resp2.Body.Close()
+	if resp2.StatusCode != http.StatusOK {
+		t.Fatalf("good-creds status = %d, want 200", resp2.StatusCode)
+	}
+}
+
 func TestRemoteAllowed(t *testing.T) {
 	cases := []struct {
 		addr    string

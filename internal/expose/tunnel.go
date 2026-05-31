@@ -36,6 +36,12 @@ func (c *Cloudflared) Expose(ctx context.Context, domain string, _ Opts) (string
 	scanner := bufio.NewScanner(stderr)
 	for scanner.Scan() {
 		if url := trycloudflareRe.FindString(scanner.Text()); url != "" {
+			// Keep draining stderr so the pipe buffer never fills and stalls
+			// the long-running tunnel process.
+			go func() {
+				for scanner.Scan() {
+				}
+			}()
 			return url, nil
 		}
 	}

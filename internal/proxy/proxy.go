@@ -5,12 +5,14 @@ package proxy
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/tls"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strings"
 	"sync/atomic"
 	"time"
 )
@@ -18,8 +20,9 @@ import (
 // Route maps an incoming host to a local upstream.
 type Route struct {
 	Domain   string `json:"domain"`
-	Upstream string `json:"upstream"` // host:port, e.g. 127.0.0.1:4310
-	Exposed  bool   `json:"exposed"`  // if false, non-loopback clients are refused
+	Upstream string `json:"upstream"`       // host:port, e.g. 127.0.0.1:4310
+	Exposed  bool   `json:"exposed"`        // if false, non-loopback clients are refused
+	Auth     string `json:"auth,omitempty"` // optional "user:pass"; enforced before proxying
 }
 
 // LiveFunc reports whether an upstream (host:port) is accepting connections.
@@ -101,6 +104,11 @@ func (s *Server) HTTPSHandler() http.Handler {
 			http.Error(w, "403 Forbidden", http.StatusForbidden)
 			return
 		}
+		if route.Auth != "" && !basicAuthOK(r, route.Auth) {
+			w.Header().Set("WWW-Authenticate", `Basic realm="prx"`)
+			http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
+			return
+		}
 		if !s.live(route.Upstream) {
 			writeNotRunning(w, host)
 			return
@@ -132,6 +140,19 @@ func remoteAllowed(remoteAddr string, exposed bool) bool {
 		return true
 	}
 	return isLoopback(remoteAddr)
+}
+
+// basicAuthOK validates request credentials against userpass ("user:pass")
+// using constant-time comparison.
+func basicAuthOK(r *http.Request, userpass string) bool {
+	wantUser, wantPass, _ := strings.Cut(userpass, ":")
+	user, pass, ok := r.BasicAuth()
+	if !ok {
+		return false
+	}
+	userEq := subtle.ConstantTimeCompare([]byte(user), []byte(wantUser)) == 1
+	passEq := subtle.ConstantTimeCompare([]byte(pass), []byte(wantPass)) == 1
+	return userEq && passEq
 }
 
 func isLoopback(remoteAddr string) bool {
