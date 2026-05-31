@@ -84,9 +84,6 @@ if [ -n "$(git status --porcelain)" ]; then
 fi
 
 git push origin main
-
-VERSION="${TAG_INPUT#v}"
-PATCH_TAG="${TAG_INPUT}"
 TARGET_SHA="$(git rev-parse origin/main)"
 
 if git rev-parse -q --verify "refs/tags/$PATCH_TAG" >/dev/null; then
