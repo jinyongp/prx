@@ -7,7 +7,7 @@ default:
 
 [doc('build the binary')]
 build:
-  go build -trimpath -ldflags "-s -w" -o bin/prx ./cmd/prx
+  go build -trimpath -ldflags "-s -w -X main.version=$(git describe --tags --always --dirty 2>/dev/null || echo dev)" -o bin/prx ./cmd/prx
 
 [doc('run prx from source, e.g. `just prx ls`, `just prx --help`')]
 prx *args:

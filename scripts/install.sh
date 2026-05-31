@@ -110,7 +110,12 @@ build_from_source() {
     fi
   fi
 
-  if ! (cd "$SOURCE_DIR" && go build -trimpath -ldflags "-s -w" -o "$BINARY_PATH" ./cmd/prx); then
+  build_version="$VERSION"
+  if [ "$build_version" = "latest" ]; then
+    build_version="$(cd "$SOURCE_DIR" && git describe --tags --always 2>/dev/null || echo dev)"
+  fi
+
+  if ! (cd "$SOURCE_DIR" && go build -trimpath -ldflags "-s -w -X main.version=${build_version}" -o "$BINARY_PATH" ./cmd/prx); then
     echo "Failed to build prx from source." >&2
     return 1
   fi
