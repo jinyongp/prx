@@ -230,7 +230,7 @@ func Prune(args []string, stdout, stderr io.Writer) int {
 // Run executes `prx run <service> -- <cmd...>` with PORT injected.
 func Run(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-		sp, _ := specFor("run")
+		sp := specFor("run")
 		WriteHelp(stdout, "run", sp.Args, sp.Summary, nil)
 		return ExitOK
 	}

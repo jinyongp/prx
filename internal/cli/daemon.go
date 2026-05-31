@@ -24,7 +24,7 @@ func pidPath() string { return filepath.Join(paths.ConfigDir(), "prx.pid") }
 // Daemon dispatches `prx daemon start|stop|status|logs`.
 func Daemon(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-		sp, _ := specFor("daemon")
+		sp := specFor("daemon")
 		WriteHelp(stdout, "daemon", sp.Args, sp.Summary, nil)
 		return ExitOK
 	}

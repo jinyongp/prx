@@ -39,13 +39,13 @@ var Specs = []CmdSpec{
 	{"skill", "path|print", "locate or print the bundled agent skill (path|print)"},
 }
 
-func specFor(name string) (CmdSpec, bool) {
+func specFor(name string) CmdSpec {
 	for _, s := range Specs {
 		if s.Name == name {
-			return s, true
+			return s
 		}
 	}
-	return CmdSpec{}, false
+	return CmdSpec{}
 }
 
 // FlagInfo is one row of a command's FLAGS section.
@@ -83,7 +83,7 @@ func signature(name, args string, hasFlags bool) string {
 // usageLine prints the short "usage: ..." line shown when required arguments are
 // missing. The caller is responsible for returning ExitUsage.
 func usageLine(w io.Writer, name string) {
-	sp, _ := specFor(name)
+	sp := specFor(name)
 	fmt.Fprintf(w, "usage: %s\n", signature(name, sp.Args, false))
 }
 
@@ -92,7 +92,7 @@ func usageLine(w io.Writer, name string) {
 // line. It returns ExitUsage so callers can `return usageFail(...)`.
 func usageFail(stderr io.Writer, jsonOut bool, name string) int {
 	if jsonOut {
-		sp, _ := specFor(name)
+		sp := specFor(name)
 		return fail(stderr, true, ExitUsage, "usage", "usage: "+signature(name, sp.Args, false))
 	}
 	usageLine(stderr, name)
@@ -144,7 +144,7 @@ func parseFlags(fs *flag.FlagSet, name string, argv []string, stdout, stderr io.
 			break
 		}
 		if a == "-h" || a == "--help" {
-			sp, _ := specFor(name)
+			sp := specFor(name)
 			WriteHelp(stdout, name, sp.Args, sp.Summary, collectFlags(fs))
 			return true, ExitOK
 		}

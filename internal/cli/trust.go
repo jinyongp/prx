@@ -36,7 +36,7 @@ func Trust(args []string, stdout, stderr io.Writer) int {
 // Ca dispatches `prx ca export`.
 func Ca(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-		sp, _ := specFor("ca")
+		sp := specFor("ca")
 		WriteHelp(stdout, "ca", sp.Args, sp.Summary, nil)
 		return ExitOK
 	}
