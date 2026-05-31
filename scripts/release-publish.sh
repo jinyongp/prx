@@ -100,8 +100,9 @@ confirm_push() {
     return 1
   fi
 
-  printf "Push branch main and tag %s now? [y/N]: " "$tag"
+  printf "Push branch main and tag %s now? [Y/n]: " "$tag"
   read -r response
+  response="${response:-y}"
 
   response_lower="$(printf '%s' "$response" | tr '[:upper:]' '[:lower:]')"
 
