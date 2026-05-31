@@ -2,16 +2,29 @@ package cli
 
 import (
 	"context"
+	"encoding/json"
 	"flag"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"os/exec"
+	"strings"
 	"time"
 )
 
-const upgradeScriptURL = "https://raw.githubusercontent.com/jinyongp/prx/main/scripts/install.sh"
+const (
+	upgradeScriptURL = "https://raw.githubusercontent.com/jinyongp/prx/main/scripts/install.sh"
+	githubLatestAPI  = "https://api.github.com/repos/jinyongp/prx/releases/latest"
+	defaultUserAgent = "prx-upgrade"
+)
+
+var currentVersion = "dev"
+
+// SetVersion stores the currently running prx version for upgrade decisions.
+func SetVersion(v string) {
+	currentVersion = v
+}
 
 // Upgrade downloads and executes the upstream install script to replace the current
 // prx binary with the latest release.
@@ -28,6 +41,18 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
 
+	latestTag, err := latestReleaseTag(ctx)
+	if err == nil {
+		if current := normalizedVersion(currentVersion); current != "" && current != "dev" {
+			if latest := normalizedVersion(latestTag); latest == current {
+				fmt.Fprintf(stdout, "prx is already up to date (%s)\n", latestTag)
+				return ExitOK
+			}
+		}
+	} else {
+		_, _ = fmt.Fprintf(stderr, "warning: unable to check latest version: %v\n", err)
+	}
+
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upgradeScriptURL, nil)
 	if err != nil {
 		return fail(stderr, false, ExitError, "upgrade", err.Error())
@@ -36,7 +61,9 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, false, ExitError, "upgrade", "failed to download install script: "+err.Error())
 	}
-	defer res.Body.Close()
+	defer func() {
+		_ = res.Body.Close()
+	}()
 
 	if res.StatusCode != http.StatusOK {
 		return fail(stderr, false, ExitError, "upgrade", fmt.Sprintf("failed to download install script: %s", res.Status))
@@ -46,7 +73,9 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, false, ExitError, "upgrade", err.Error())
 	}
-	defer os.Remove(script.Name())
+	defer func() {
+		_ = os.Remove(script.Name())
+	}()
 
 	if _, err := io.Copy(script, res.Body); err != nil {
 		return fail(stderr, false, ExitError, "upgrade", err.Error())
@@ -67,4 +96,41 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "upgrade complete")
 	return ExitOK
+}
+
+type githubRelease struct {
+	TagName string `json:"tag_name"`
+}
+
+func latestReleaseTag(ctx context.Context) (string, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, githubLatestAPI, nil)
+	if err != nil {
+		return "", err
+	}
+	req.Header.Set("User-Agent", defaultUserAgent)
+	res, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() {
+		_ = res.Body.Close()
+	}()
+
+	if res.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("failed to check latest release: %s", res.Status)
+	}
+	var release githubRelease
+	if err := json.NewDecoder(res.Body).Decode(&release); err != nil {
+		return "", err
+	}
+	if release.TagName == "" {
+		return "", fmt.Errorf("latest release has empty tag_name")
+	}
+	return release.TagName, nil
+}
+
+func normalizedVersion(v string) string {
+	v = strings.TrimSpace(v)
+	v = strings.TrimPrefix(strings.ToLower(v), "v")
+	return v
 }
