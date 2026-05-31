@@ -31,7 +31,7 @@ lint-json:
 
 [doc('vulnerability scan (narrowed to actually-called code)')]
 vuln:
-  govulncheck ./...
+  go run golang.org/x/vuln/cmd/govulncheck@v1.3.0 ./...
 
 [doc('format with gofmt + goimports')]
 fmt:
@@ -42,7 +42,7 @@ fmt:
 check: test lint vuln
 
 [doc('release a new version: no arg => interactive patch/minor/major; patch/minor/major -> bump from latest tag; explicit vX.Y.Z')]
-release tag="":
+release tag="": check
   ./scripts/release-publish.sh "{{tag}}"
 
 [doc('cross-compile all release targets into bin/')]
