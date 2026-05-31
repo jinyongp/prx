@@ -133,15 +133,30 @@ if [ ! -f "$BINARY_PATH" ]; then
 fi
 chmod +x "$BINARY_PATH"
 
-if [ -w /usr/local/bin ]; then
-  DEST="/usr/local/bin/prx"
-elif [ -w "$HOME/.local/bin" ] || mkdir -p "$HOME/.local/bin"; then
-  DEST="$HOME/.local/bin/prx"
-else
+DEST_DIR=""
+IFS_SAVE="$IFS"
+IFS=":"
+for p in $PATH; do
+  if [ -n "$p" ] && [ -d "$p" ] && [ -w "$p" ]; then
+    DEST_DIR="$p"
+    break
+  fi
+done
+IFS="$IFS_SAVE"
+
+if [ -z "$DEST_DIR" ] && [ -w /usr/local/bin ]; then
+  DEST_DIR="/usr/local/bin"
+elif [ -z "$DEST_DIR" ] && ([ -w "$HOME/.local/bin" ] || mkdir -p "$HOME/.local/bin"); then
+  DEST_DIR="$HOME/.local/bin"
+fi
+
+if [ -z "$DEST_DIR" ]; then
   echo "Error: no writable install directory found." >&2
   echo "Grant permissions or use a custom destination in your shell manually." >&2
   exit 1
 fi
+
+DEST="${DEST_DIR}/prx"
 
 if command -v install >/dev/null 2>&1; then
   install -m 755 "$BINARY_PATH" "$DEST"
