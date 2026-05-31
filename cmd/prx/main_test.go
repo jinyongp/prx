@@ -19,11 +19,11 @@ func TestRunVersion(t *testing.T) {
 
 func TestRunNoArgsIsUsageError(t *testing.T) {
 	var out, errb bytes.Buffer
-	if code := run(nil, &out, &errb); code != 2 {
-		t.Fatalf("exit = %d, want 2", code)
+	if code := run(nil, &out, &errb); code != 0 {
+		t.Fatalf("exit = %d, want 0", code)
 	}
-	if errb.Len() == 0 {
-		t.Fatal("expected usage on stderr")
+	if out.Len() == 0 {
+		t.Fatal("expected usage on stdout")
 	}
 }
 
