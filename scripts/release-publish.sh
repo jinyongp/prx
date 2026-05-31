@@ -178,7 +178,15 @@ else
 
   if [ -z "$LATEST_TAG" ]; then
     LATEST_TAG="v0.0.0"
+    RANGE=""
+  else
+    RANGE="${LATEST_TAG}..HEAD"
   fi
+
+  echo "Last release tag: $LATEST_TAG"
+  echo "Commits since $LATEST_TAG:"
+  format_commits "$RANGE" | sed 's/^/- /'
+  echo
 fi
 
 case "$TAG_INPUT" in
@@ -231,12 +239,12 @@ if [ "$DRY_RUN" -eq 1 ]; then
   exit 0
 fi
 
-git tag -a "$PATCH_TAG" -m "Release $PATCH_TAG" "$TARGET_SHA"
-
-if confirm_push "$PATCH_TAG" "$AUTO_PUSH"; then
-  git push --follow-tags
-  echo "Pushed branch and follow-up tag $PATCH_TAG"
-else
-  echo "Tag created locally only."
-  echo "Push with: git push --follow-tags"
+if ! confirm_push "$PATCH_TAG" "$AUTO_PUSH"; then
+  echo "Aborted. No tag created."
+  exit 0
 fi
+
+RELEASE_NOTES="$(printf 'Release %s\n\n%s' "$PATCH_TAG" "$(format_commits "$RANGE" | sed 's/^/- /')")"
+git tag -a "$PATCH_TAG" -m "$RELEASE_NOTES" "$TARGET_SHA"
+git push --follow-tags
+echo "Created and pushed tag $PATCH_TAG"

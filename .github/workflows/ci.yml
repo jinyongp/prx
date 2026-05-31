@@ -79,12 +79,18 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           TAG="${{ steps.release_tag.outputs.tag }}"
+          # Use the annotated tag message (written by scripts/release-publish.sh,
+          # a "Release <tag>" header plus the commit changelog) as the notes.
+          # subject+body excludes any GPG signature block; fall back to a bare
+          # line for lightweight tags.
+          NOTES="$(git tag -l --format='%(contents:subject)%0a%0a%(contents:body)' "$TAG")"
+          [ -n "$(echo "$NOTES" | tr -d '[:space:]')" ] || NOTES="Release $TAG"
           if gh release view "$TAG" >/dev/null 2>&1; then
             gh release upload "$TAG" prx-* checksums.txt --clobber
           else
             gh release create "$TAG" \
               prx-darwin-amd64 prx-darwin-arm64 prx-linux-amd64 prx-linux-arm64 checksums.txt \
               --title "$TAG" \
-              --notes "Release $TAG" \
+              --notes "$NOTES" \
               --verify-tag
           fi
