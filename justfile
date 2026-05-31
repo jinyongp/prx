@@ -1,7 +1,7 @@
 # Command runner is `just` (install: https://github.com/casey/just).
 set quiet
 
-[doc('list recipes')]
+[private]
 default:
   @just --list
 
@@ -36,7 +36,7 @@ vuln:
 [doc('format with gofmt + goimports')]
 fmt:
   gofmt -w .
-  goimports -w .
+  go run golang.org/x/tools/cmd/goimports@latest -w .
 
 [doc('full gate — run before opening a PR')]
 check: test lint vuln
