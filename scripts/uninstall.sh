@@ -6,7 +6,6 @@ FOUND=0
 TARGET_DIRS="
 /usr/local/bin
 $HOME/.local/bin
-$HOME/.pyenv/shims
 "
 
 if [ -n "${PRX_BIN_DIR:-}" ]; then
