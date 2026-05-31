@@ -28,11 +28,10 @@ type upResult struct {
 // route table to a running daemon (or prints it when none is running).
 func Up(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("up", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	dnsMode := fs.String("dns", "", "force DNS mode: localhost|hosts")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "up", args, stdout, stderr); handled {
+		return code
 	}
 
 	project, path, err := currentProjectPath()
@@ -106,10 +105,9 @@ func Up(args []string, stdout, stderr io.Writer) int {
 // and removes its DNS entries.
 func Down(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("down", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "down", args, stdout, stderr); handled {
+		return code
 	}
 	project, _, err := currentProjectPath()
 	if err != nil {

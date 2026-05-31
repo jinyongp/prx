@@ -30,12 +30,11 @@ func SetVersion(v string) {
 // prx binary with the latest release.
 func Upgrade(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "upgrade", args, stdout, stderr); handled {
+		return code
 	}
 	if fs.NArg() != 0 {
-		return fail(stderr, false, ExitUsage, "usage", "usage: prx upgrade")
+		return usageFail(stderr, false, "upgrade")
 	}
 
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

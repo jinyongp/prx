@@ -17,9 +17,8 @@ import (
 // the bundled SKILL.md for manual use and debugging.
 func Skill(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("skill", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "skill", args, stdout, stderr); handled {
+		return code
 	}
 	sub := "path"
 	if fs.NArg() > 0 {
@@ -40,6 +39,6 @@ func Skill(args []string, stdout, stderr io.Writer) int {
 		_, _ = stdout.Write(prx.SkillMD)
 		return ExitOK
 	default:
-		return fail(stderr, false, ExitUsage, "usage", "usage: prx skill path|print")
+		return usageFail(stderr, false, "skill")
 	}
 }

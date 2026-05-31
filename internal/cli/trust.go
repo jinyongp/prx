@@ -16,9 +16,8 @@ import (
 // Trust installs the root CA into the OS and browser trust stores.
 func Trust(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("trust", flag.ContinueOnError)
-	fs.SetOutput(stderr)
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "trust", args, stdout, stderr); handled {
+		return code
 	}
 	authority, err := ca.Load(paths.DataDir())
 	if err != nil {
@@ -37,16 +36,18 @@ func Trust(args []string, stdout, stderr io.Writer) int {
 // Ca dispatches `prx ca export`.
 func Ca(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-		return fail(stderr, false, ExitOK, "usage", "usage: prx ca export [--out <path>]")
+		sp, _ := specFor("ca")
+		WriteHelp(stdout, "ca", sp.Args, sp.Summary, nil)
+		return ExitOK
 	}
 	if len(args) == 0 || args[0] != "export" {
-		return fail(stderr, false, ExitUsage, "usage", "usage: prx ca export [--out <path>]")
+		usageLine(stderr, "ca")
+		return ExitUsage
 	}
 	fs := flag.NewFlagSet("ca export", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	out := fs.String("out", "prx-root.crt", "output path")
-	if err := fs.Parse(args[1:]); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "ca export", args[1:], stdout, stderr); handled {
+		return code
 	}
 	authority, err := ca.Load(paths.DataDir())
 	if err != nil {
@@ -63,16 +64,15 @@ func Ca(args []string, stdout, stderr io.Writer) int {
 // Expose publishes a service beyond this machine via a provider.
 func Expose(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("expose", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	via := fs.String("via", "local", "provider: local|lan|cloudflared|tailscale")
 	auth := fs.String("auth", "", "require basic auth as user:pass")
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "expose", args, stdout, stderr); handled {
+		return code
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		return fail(stderr, *jsonOut, ExitUsage, "usage", "usage: prx expose <service> --via <provider>")
+		return usageFail(stderr, *jsonOut, "expose")
 	}
 	svc := rest[0]
 	project, err := currentProject()

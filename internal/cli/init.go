@@ -15,12 +15,11 @@ import (
 // Init scaffolds a starter prx.toml in the current directory.
 func Init(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	force := fs.Bool("force", false, "overwrite an existing prx.toml")
 	name := fs.String("name", "", "project name (default: current directory name)")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "init", args, stdout, stderr); handled {
+		return code
 	}
 
 	cwd, err := os.Getwd()

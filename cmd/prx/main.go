@@ -4,14 +4,16 @@ package main
 
 import (
 	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"os"
+	"strings"
 	"text/tabwriter"
 
 	"prx/internal/cli"
 	"prx/internal/ui"
+
+	"github.com/spf13/cobra"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -24,6 +26,12 @@ func main() {
 
 // command implements a single prx subcommand and returns a process exit code.
 type command func(args []string, stdout, stderr io.Writer) int
+
+type exitCodeError struct{ code int }
+
+func (e exitCodeError) Error() string {
+	return fmt.Sprintf("prx: command exited with code %d", e.code)
+}
 
 // commands is the subcommand dispatch table. Subcommands register here as
 // features land across the implementation phases.
@@ -47,54 +55,114 @@ var commands = map[string]command{
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
-	fs := flag.NewFlagSet("prx", flag.ContinueOnError)
-	fs.SetOutput(stdout)
-	showVersion := fs.Bool("version", false, "print version and exit")
-	fs.Usage = func() { usage(stdout) }
-	if err := fs.Parse(args); err != nil {
-		if errors.Is(err, flag.ErrHelp) {
-			return 0
-		}
-		return 2
+	root := &cobra.Command{
+		Use:           "prx",
+		Short:         "local-dev HTTPS reverse proxy + port registry",
+		SilenceUsage:  true,
+		SilenceErrors: true,
+		Args:          cobra.ArbitraryArgs,
+		RunE: func(cmd *cobra.Command, cmdArgs []string) error {
+			if len(cmdArgs) == 0 {
+				usage(cmd.OutOrStdout())
+				return nil
+			}
+			fmt.Fprintf(cmd.ErrOrStderr(), "prx: unknown command %q\n", cmdArgs[0])
+			usage(cmd.ErrOrStderr())
+			return exitCodeError{code: 2}
+		},
 	}
-	if *showVersion {
-		fmt.Fprintln(stdout, version)
-		return 0
+	root.SetOut(stdout)
+	root.SetErr(stderr)
+	root.SetArgs(args)
+	root.Version = version
+	root.SetVersionTemplate("{{.Version}}\n")
+	// Override help for the root only; subcommands (e.g. the built-in
+	// completion command) keep cobra's default help so their own argument
+	// usage is shown instead of prx's top-level usage.
+	defaultHelp := root.HelpFunc()
+	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+		if cmd == root {
+			usage(cmd.OutOrStdout())
+			return
+		}
+		defaultHelp(cmd, args)
+	})
+	defaultUsage := root.UsageFunc()
+	root.SetUsageFunc(func(cmd *cobra.Command) error {
+		if cmd == root {
+			usage(cmd.ErrOrStderr())
+			return nil
+		}
+		return defaultUsage(cmd)
+	})
+
+	for name, commandFn := range commands {
+		sub := &cobra.Command{
+			Use:                name,
+			Short:              commandSummary(name),
+			Args:               cobra.ArbitraryArgs,
+			DisableFlagParsing: true,
+			SilenceUsage:       true,
+			SilenceErrors:      true,
+			RunE: func(cmd *cobra.Command, cmdArgs []string) error {
+				code := commandFn(cmdArgs, cmd.OutOrStdout(), cmd.ErrOrStderr())
+				if code == 0 {
+					return nil
+				}
+				return exitCodeError{code: code}
+			},
+		}
+		sub.Hidden = strings.HasPrefix(name, "__")
+		root.AddCommand(sub)
 	}
 
-	rest := fs.Args()
-	if len(rest) == 0 {
-		usage(stdout)
-		return 0
+	// prx targets Unix only, so drop powershell from the generated completion
+	// command to avoid advertising an unsupported shell. Render its help in the
+	// same style as every other subcommand so the whole CLI surface is uniform.
+	root.InitDefaultCompletionCmd()
+	if completionCmd, _, err := root.Find([]string{"completion"}); err == nil {
+		for _, sub := range completionCmd.Commands() {
+			if sub.Name() == "powershell" {
+				completionCmd.RemoveCommand(sub)
+			}
+		}
+		completionCmd.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
+			cli.WriteHelp(cmd.OutOrStdout(), "completion", commandArgs("completion"), commandSummary("completion"), nil)
+		})
 	}
-	cmd, ok := commands[rest[0]]
-	if !ok {
-		fmt.Fprintf(stderr, "prx: unknown command %q\n", rest[0])
+
+	if err := root.Execute(); err != nil {
+		var codeErr exitCodeError
+		if errors.As(err, &codeErr) {
+			return codeErr.code
+		}
+		fmt.Fprintln(stderr, err)
 		usage(stderr)
 		return 2
 	}
-	return cmd(rest[1:], stdout, stderr)
+
+	return 0
 }
 
-// commandHelp lists public subcommands in display order with a one-line
-// summary. Keep in sync with the commands dispatch table; internal commands
-// (prefixed "__") are intentionally omitted.
-var commandHelp = []struct{ name, summary string }{
-	{"init", "scaffold a starter prx.toml in the current directory"},
-	{"up", "bring up the current project: reserve ports, render routes, reload"},
-	{"down", "tear down the current project's routes and free its ports"},
-	{"ls", "list all reservations with live/down status"},
-	{"port", "print the reserved port for a service"},
-	{"add", "reserve a port for a domain in the current project"},
-	{"rm", "remove a domain reservation from the current project"},
-	{"prune", "remove reservations whose project config no longer exists"},
-	{"run", "run a child process with PORT injected from the reservation"},
-	{"daemon", "control the background proxy daemon (start/stop/status/restart)"},
-	{"trust", "install the local CA into the OS and browser trust stores"},
-	{"ca", "export the local CA certificate"},
-	{"expose", "publish a local service through a public tunnel provider"},
-	{"upgrade", "upgrade prx to the latest GitHub release"},
-	{"skill", "locate or print the bundled agent skill (path|print)"},
+// commandSummary returns a subcommand's one-line summary from cli.Specs, the
+// single source of truth shared with per-command help.
+func commandSummary(name string) string {
+	for _, s := range cli.Specs {
+		if s.Name == name {
+			return s.Summary
+		}
+	}
+	return ""
+}
+
+// commandArgs returns a subcommand's positional-argument signature from cli.Specs.
+func commandArgs(name string) string {
+	for _, s := range cli.Specs {
+		if s.Name == name {
+			return s.Args
+		}
+	}
+	return ""
 }
 
 func usage(w io.Writer) {
@@ -110,8 +178,8 @@ usage:
 commands:
 `)
 	tw := tabwriter.NewWriter(w, 0, 0, 2, ' ', 0)
-	for _, c := range commandHelp {
-		fmt.Fprintf(tw, "  %s\t%s\n", c.name, c.summary)
+	for _, c := range cli.Specs {
+		fmt.Fprintf(tw, "  %s\t%s\n", c.Name, c.Summary)
 	}
 	if err := tw.Flush(); err != nil {
 		fmt.Fprintln(w, "prx: failed to render usage table", err)
@@ -120,7 +188,7 @@ commands:
 }
 
 // commandGroups arranges commands into labelled sections for the rich usage
-// screen. Every commandHelp entry should appear in some group; any that does
+// screen. Every cli.Specs entry should appear in some group; any that does
 // not is collected under "MISC" so nothing silently disappears.
 var commandGroups = []struct {
 	title string
@@ -131,17 +199,17 @@ var commandGroups = []struct {
 	{"DAEMON", []string{"daemon"}},
 	{"TLS", []string{"trust", "ca"}},
 	{"SHARE", []string{"expose"}},
-	{"MAINTENANCE", []string{"upgrade", "skill"}},
+	{"MAINTENANCE", []string{"upgrade", "skill", "completion"}},
 }
 
 // usageRich renders a styled, grouped usage screen for TTYs.
 func usageRich(w io.Writer) {
-	summary := make(map[string]string, len(commandHelp))
+	summary := make(map[string]string, len(cli.Specs))
 	width := 0
-	for _, c := range commandHelp {
-		summary[c.name] = c.summary
-		if len(c.name) > width {
-			width = len(c.name)
+	for _, c := range cli.Specs {
+		summary[c.Name] = c.Summary
+		if len(c.Name) > width {
+			width = len(c.Name)
 		}
 	}
 
@@ -158,9 +226,9 @@ func usageRich(w io.Writer) {
 	}
 
 	var misc []string
-	for _, c := range commandHelp {
-		if !grouped[c.name] {
-			misc = append(misc, c.name)
+	for _, c := range cli.Specs {
+		if !grouped[c.Name] {
+			misc = append(misc, c.Name)
 		}
 	}
 	if len(misc) > 0 {

@@ -24,10 +24,13 @@ func pidPath() string { return filepath.Join(paths.ConfigDir(), "prx.pid") }
 // Daemon dispatches `prx daemon start|stop|status|logs`.
 func Daemon(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-		return fail(stderr, false, ExitOK, "usage", "usage: prx daemon start|stop|status|logs")
+		sp, _ := specFor("daemon")
+		WriteHelp(stdout, "daemon", sp.Args, sp.Summary, nil)
+		return ExitOK
 	}
 	if len(args) == 0 {
-		return fail(stderr, false, ExitUsage, "usage", "usage: prx daemon start|stop|status|logs")
+		usageLine(stderr, "daemon")
+		return ExitUsage
 	}
 	sub, rest := args[0], args[1:]
 	switch sub {
@@ -40,16 +43,16 @@ func Daemon(args []string, stdout, stderr io.Writer) int {
 	case "logs":
 		return daemonLogs(stdout, stderr)
 	default:
-		return fail(stderr, false, ExitUsage, "usage", "unknown subcommand: "+sub)
+		usageLine(stderr, "daemon")
+		return ExitUsage
 	}
 }
 
 func daemonStatus(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("status", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "daemon status", args, stdout, stderr); handled {
+		return code
 	}
 	client := daemon.NewClient(paths.SocketPath())
 	st, err := client.Status()

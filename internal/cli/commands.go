@@ -54,10 +54,9 @@ func currentProject() (*config.Project, error) {
 // Ls prints all reservations with live/down status.
 func Ls(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "ls", args, stdout, stderr); handled {
+		return code
 	}
 
 	reg, err := registryStore().Read()
@@ -108,14 +107,13 @@ func Ls(args []string, stdout, stderr io.Writer) int {
 // Port prints the reserved port for a service (script injection).
 func Port(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("port", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "port", args, stdout, stderr); handled {
+		return code
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		return fail(stderr, *jsonOut, ExitUsage, "usage", "usage: prx port <service>")
+		return usageFail(stderr, *jsonOut, "port")
 	}
 	svc := rest[0]
 	p, err := currentProject()
@@ -143,19 +141,18 @@ func Port(args []string, stdout, stderr io.Writer) int {
 // Add reserves a domain→port mapping (adhoc registry entry).
 func Add(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "add", args, stdout, stderr); handled {
+		return code
 	}
 	rest := fs.Args()
 	if len(rest) != 2 {
-		return fail(stderr, *jsonOut, ExitUsage, "usage", "usage: prx add <domain> <port>")
+		return usageFail(stderr, *jsonOut, "add")
 	}
 	domain := rest[0]
 	p, err := strconv.Atoi(rest[1])
 	if err != nil || p < 1 || p > 65535 {
-		return fail(stderr, *jsonOut, ExitUsage, "usage", "port must be 1-65535")
+		return fail(stderr, *jsonOut, ExitUsage, "bad_port", "port must be 1-65535")
 	}
 
 	res := registry.Reservation{Service: domain, Domain: domain, Port: p, TLS: config.TLSInternal, Adhoc: true}
@@ -177,14 +174,13 @@ func Add(args []string, stdout, stderr io.Writer) int {
 // Rm removes the reservation for a domain.
 func Rm(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("rm", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "rm", args, stdout, stderr); handled {
+		return code
 	}
 	rest := fs.Args()
 	if len(rest) != 1 {
-		return fail(stderr, *jsonOut, ExitUsage, "usage", "usage: prx rm <domain>")
+		return usageFail(stderr, *jsonOut, "rm")
 	}
 	domain := rest[0]
 	var removed bool
@@ -208,10 +204,9 @@ func Rm(args []string, stdout, stderr io.Writer) int {
 // Prune garbage-collects reservations whose owning prx.toml no longer exists.
 func Prune(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("prune", flag.ContinueOnError)
-	fs.SetOutput(stderr)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	if err := fs.Parse(args); err != nil {
-		return parseExit(err)
+	if handled, code := parseFlags(fs, "prune", args, stdout, stderr); handled {
+		return code
 	}
 	var removed []registry.Reservation
 	err := registryStore().Update(func(r *registry.Registry) error {
@@ -235,12 +230,15 @@ func Prune(args []string, stdout, stderr io.Writer) int {
 // Run executes `prx run <service> -- <cmd...>` with PORT injected.
 func Run(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
-		return fail(stderr, false, ExitOK, "usage", "usage: prx run <service> -- <cmd> [args]")
+		sp, _ := specFor("run")
+		WriteHelp(stdout, "run", sp.Args, sp.Summary, nil)
+		return ExitOK
 	}
 
 	sep := indexOf(args, "--")
 	if len(args) < 1 || sep < 1 || sep+1 >= len(args) {
-		return fail(stderr, false, ExitUsage, "usage", "usage: prx run <service> -- <cmd> [args]")
+		usageLine(stderr, "run")
+		return ExitUsage
 	}
 	svc := args[0]
 	cmd := args[sep+1:]

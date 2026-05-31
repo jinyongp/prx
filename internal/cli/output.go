@@ -5,8 +5,6 @@ package cli
 
 import (
 	"encoding/json"
-	"errors"
-	"flag"
 	"fmt"
 	"io"
 	"path/filepath"
@@ -77,11 +75,4 @@ func statusDot(status string, color bool) string {
 		return ui.Tint(ui.Success, "●") + " live"
 	}
 	return ui.Tint(ui.Muted, "○") + " down"
-}
-
-func parseExit(err error) int {
-	if errors.Is(err, flag.ErrHelp) {
-		return ExitOK
-	}
-	return ExitUsage
 }
