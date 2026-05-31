@@ -9,12 +9,11 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"os"
 	"path/filepath"
 
-	"golang.org/x/term"
 	"prx/internal/paths"
 	"prx/internal/registry"
+	"prx/internal/ui"
 )
 
 // Exit codes (see README §13).
@@ -31,13 +30,11 @@ func registryStore() *registry.Store {
 }
 
 // isTTY reports whether w is an interactive terminal and colour is permitted.
-func isTTY(w io.Writer) bool {
-	if os.Getenv("NO_COLOR") != "" {
-		return false
-	}
-	f, ok := w.(*os.File)
-	return ok && term.IsTerminal(int(f.Fd()))
-}
+func isTTY(w io.Writer) bool { return ui.Enabled(w) }
+
+// richOut is the single gate for styled (lipgloss) output: a real terminal,
+// NO_COLOR unset, and not emitting JSON.
+func richOut(w io.Writer, jsonOut bool) bool { return !jsonOut && ui.Enabled(w) }
 
 func writeJSON(w io.Writer, v any) int {
 	enc := json.NewEncoder(w)
@@ -77,9 +74,9 @@ func statusDot(status string, color bool) string {
 		return "o down"
 	}
 	if status == "live" {
-		return "\x1b[32m●\x1b[0m live"
+		return ui.Tint(ui.Success, "●") + " live"
 	}
-	return "\x1b[90m○\x1b[0m down"
+	return ui.Tint(ui.Muted, "○") + " down"
 }
 
 func parseExit(err error) int {

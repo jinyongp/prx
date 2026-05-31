@@ -12,6 +12,7 @@ import (
 	"prx/internal/config"
 	"prx/internal/port"
 	"prx/internal/registry"
+	"prx/internal/ui"
 )
 
 // service is one row of `prx ls` output.
@@ -74,6 +75,25 @@ func Ls(args []string, stdout, stderr io.Writer) int {
 
 	if *jsonOut {
 		return writeJSON(stdout, map[string]any{"services": rows})
+	}
+	if len(rows) == 0 {
+		if richOut(stdout, false) {
+			fmt.Fprintln(stdout, ui.Dim.Render("No reservations yet — run `prx up` in a project or `prx add <domain> <port>`."))
+		} else {
+			fmt.Fprintln(stdout, "No reservations.")
+		}
+		return ExitOK
+	}
+	if richOut(stdout, false) {
+		headers := []string{"PROJECT", "SERVICE", "DOMAIN", "PORT", "TLS", "STATUS"}
+		data := make([][]string, 0, len(rows))
+		for _, r := range rows {
+			data = append(data, []string{
+				r.Project, r.Service, r.Domain, strconv.Itoa(r.Port), r.TLS, statusDot(r.Status, true),
+			})
+		}
+		fmt.Fprintln(stdout, ui.Render(headers, data))
+		return ExitOK
 	}
 	color := isTTY(stdout)
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)

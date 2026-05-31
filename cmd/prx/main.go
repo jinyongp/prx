@@ -11,6 +11,7 @@ import (
 	"text/tabwriter"
 
 	"prx/internal/cli"
+	"prx/internal/ui"
 )
 
 // version is overridden at build time via -ldflags "-X main.version=...".
@@ -27,6 +28,7 @@ type command func(args []string, stdout, stderr io.Writer) int
 // commands is the subcommand dispatch table. Subcommands register here as
 // features land across the implementation phases.
 var commands = map[string]command{
+	"init":    cli.Init,
 	"up":      cli.Up,
 	"down":    cli.Down,
 	"ls":      cli.Ls,
@@ -78,6 +80,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 // summary. Keep in sync with the commands dispatch table; internal commands
 // (prefixed "__") are intentionally omitted.
 var commandHelp = []struct{ name, summary string }{
+	{"init", "scaffold a starter prx.toml in the current directory"},
 	{"up", "bring up the current project: reserve ports, render routes, reload"},
 	{"down", "tear down the current project's routes and free its ports"},
 	{"ls", "list all reservations with live/down status"},
@@ -95,6 +98,10 @@ var commandHelp = []struct{ name, summary string }{
 }
 
 func usage(w io.Writer) {
+	if ui.Enabled(w) {
+		usageRich(w)
+		return
+	}
 	fmt.Fprint(w, `prx — local-dev HTTPS reverse proxy + port registry
 
 usage:
@@ -110,4 +117,58 @@ commands:
 		fmt.Fprintln(w, "prx: failed to render usage table", err)
 	}
 	fmt.Fprint(w, "\nRun 'prx <command> -h' for command-specific flags.\n")
+}
+
+// commandGroups arranges commands into labelled sections for the rich usage
+// screen. Every commandHelp entry should appear in some group; any that does
+// not is collected under "MISC" so nothing silently disappears.
+var commandGroups = []struct {
+	title string
+	names []string
+}{
+	{"PROJECT", []string{"init", "up", "down", "ls", "run", "port"}},
+	{"REGISTRY", []string{"add", "rm", "prune"}},
+	{"DAEMON", []string{"daemon"}},
+	{"TLS", []string{"trust", "ca"}},
+	{"SHARE", []string{"expose"}},
+	{"MAINTENANCE", []string{"upgrade", "skill"}},
+}
+
+// usageRich renders a styled, grouped usage screen for TTYs.
+func usageRich(w io.Writer) {
+	summary := make(map[string]string, len(commandHelp))
+	width := 0
+	for _, c := range commandHelp {
+		summary[c.name] = c.summary
+		if len(c.name) > width {
+			width = len(c.name)
+		}
+	}
+
+	fmt.Fprintln(w, ui.Title("prx", "local-dev HTTPS reverse proxy + port registry"))
+	fmt.Fprintf(w, "\n%s\n  prx [--version] <command> [args]\n", ui.Section("USAGE"))
+
+	grouped := map[string]bool{}
+	for _, g := range commandGroups {
+		fmt.Fprintf(w, "\n%s\n", ui.Section(g.title))
+		for _, name := range g.names {
+			grouped[name] = true
+			fmt.Fprintf(w, "  %s  %s\n", ui.Command(name, width), summary[name])
+		}
+	}
+
+	var misc []string
+	for _, c := range commandHelp {
+		if !grouped[c.name] {
+			misc = append(misc, c.name)
+		}
+	}
+	if len(misc) > 0 {
+		fmt.Fprintf(w, "\n%s\n", ui.Section("MISC"))
+		for _, name := range misc {
+			fmt.Fprintf(w, "  %s  %s\n", ui.Command(name, width), summary[name])
+		}
+	}
+
+	fmt.Fprintf(w, "\n%s\n", ui.Dim.Render("Run 'prx <command> -h' for command-specific flags."))
 }

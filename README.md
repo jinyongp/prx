@@ -50,7 +50,7 @@ Use `-y` to skip it in automation.
 
 ## Quick start
 
-1. Add `prx.toml` in your project root.
+1. Add `prx.toml` in your project root — run `prx init` to scaffold one, or write it manually:
 
 ```toml
 [project]
