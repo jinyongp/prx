@@ -28,7 +28,7 @@ for arg in "$@"; do
       ;;
     *)
       echo "Unknown argument: $arg"
-      echo "Usage: scripts/release-publish.sh [--dry-run|-n] [--yes|-y] [patch|minor|major|vX.Y.Z]"
+      echo "Usage: scripts/release/publish.sh [--dry-run|-n] [--yes|-y] [patch|minor|major|vX.Y.Z]"
       exit 1
       ;;
   esac
@@ -131,6 +131,51 @@ confirm_push() {
       ;;
   esac
 }
+
+working_tree_changes() {
+  git status --porcelain
+}
+
+confirm_dirty_tree() {
+  local changes="$1"
+
+  echo "Working tree has uncommitted changes:"
+  printf '%s\n' "$changes" | sed 's/^/  /'
+
+  if [ "$DRY_RUN" -eq 1 ]; then
+    echo "This is a dry run; no tag or push will be created."
+  else
+    echo "Continuing will release the current HEAD only; uncommitted changes are not included."
+  fi
+
+  if [ "$AUTO_PUSH" -eq 1 ] || [ -n "${CI:-}" ]; then
+    echo "Dirty working tree requires interactive confirmation; aborting release."
+    exit 1
+  fi
+
+  printf "Continue with dirty working tree? [y/N]: "
+  if ! read -r response; then
+    echo
+    echo "No response; aborting release."
+    exit 1
+  fi
+
+  response_lower="$(printf '%s' "$response" | tr '[:upper:]' '[:lower:]')"
+  case "$response_lower" in
+    y|yes)
+      return 0
+      ;;
+    *)
+      echo "Aborted. Commit or stash changes before releasing."
+      exit 0
+      ;;
+  esac
+}
+
+DIRTY_CHANGES="$(working_tree_changes)"
+if [ -n "$DIRTY_CHANGES" ]; then
+  confirm_dirty_tree "$DIRTY_CHANGES"
+fi
 
 if ! sync_tags; then
   echo "Failed to fetch tags from origin; aborting to avoid releasing from stale local tags."
@@ -237,15 +282,6 @@ fi
 if [ "$(git symbolic-ref --short HEAD)" != "main" ]; then
   echo "release must run on branch 'main'."
   exit 1
-fi
-
-if [ "$DRY_RUN" -eq 0 ] && [ -n "$(git status --porcelain)" ]; then
-  echo "Working tree is dirty. Commit or stash changes first."
-  exit 1
-fi
-
-if [ "$DRY_RUN" -eq 1 ] && [ -n "$(git status --porcelain)" ]; then
-  echo "DRY-RUN: working tree is dirty; continuing without tag checks."
 fi
 
 TARGET_SHA="$(git rev-parse HEAD)"

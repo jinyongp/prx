@@ -18,11 +18,11 @@ prx *args:
 
 [doc('run tests with the race detector')]
 test:
-  go test -race ./...
+  bash scripts/dev/go-test-format.sh
 
 [doc('tests + coverage')]
 cover:
-  go test -race -cover ./...
+  bash scripts/dev/go-test-format.sh -cover
 
 [doc('check gofmt without writing files')]
 fmt-check:
@@ -49,16 +49,7 @@ vuln:
 
 [doc('shell script syntax/lint smoke checks')]
 scripts-check:
-  #!/usr/bin/env bash
-  set -euo pipefail
-  sh -n scripts/install.sh scripts/uninstall.sh scripts/build-prx.sh
-  bash -n scripts/release-publish.sh
-  if command -v shellcheck >/dev/null 2>&1; then
-    shellcheck -S warning scripts/*.sh
-  fi
-  if command -v shfmt >/dev/null 2>&1; then
-    shfmt -d scripts/*.sh
-  fi
+  bash scripts/dev/check-scripts.sh
 
 [doc('format with gofmt + goimports')]
 fmt:
@@ -70,14 +61,8 @@ check: fmt-check vet cover lint vuln scripts-check
 
 [doc('release a new version: no arg => interactive patch/minor/major; patch/minor/major -> bump from latest tag; explicit vX.Y.Z')]
 release tag="":
-  ./scripts/release-publish.sh "{{tag}}"
+  ./scripts/release/publish.sh "{{tag}}"
 
 [doc('cross-compile all release targets into bin/')]
 build-all version="dev":
-  #!/usr/bin/env bash
-  set -euo pipefail
-  for t in darwin/arm64 darwin/amd64 linux/arm64 linux/amd64; do
-    os="${t%/*}"; arch="${t#*/}"
-    GOOS="$os" GOARCH="$arch" go build -trimpath -ldflags "-s -w -X main.version={{version}}" -o "bin/prx-$os-$arch" ./cmd/prx
-    echo "built bin/prx-$os-$arch"
-  done
+  scripts/release/build-prx.sh "{{version}}" bin
