@@ -100,7 +100,7 @@ confirm_push() {
     return 1
   fi
 
-  printf "Push tag %s now? [y/N]: " "$tag"
+  printf "Push branch main and tag %s now? [y/N]: " "$tag"
   read -r response
 
   case "${response,,}" in
@@ -216,12 +216,7 @@ if [ "$DRY_RUN" -eq 1 ] && [ -n "$(git status --porcelain)" ]; then
   echo "DRY-RUN: working tree is dirty; continuing without tag checks."
 fi
 
-if [ "$DRY_RUN" -eq 0 ]; then
-  git push origin main
-  TARGET_SHA="$(git rev-parse origin/main)"
-else
-  TARGET_SHA="$(git rev-parse HEAD)"
-fi
+TARGET_SHA="$(git rev-parse HEAD)"
 
 if git rev-parse -q --verify "refs/tags/$PATCH_TAG" >/dev/null; then
   echo "Patch tag already exists: $PATCH_TAG"
@@ -241,9 +236,10 @@ fi
 git tag -a "$PATCH_TAG" -m "Release $PATCH_TAG" "$TARGET_SHA"
 
 if confirm_push "$PATCH_TAG" "$AUTO_PUSH"; then
-  git push origin "$PATCH_TAG"
-  echo "Pushed tag $PATCH_TAG"
+  git push origin main "$PATCH_TAG"
+  echo "Pushed main and tag $PATCH_TAG"
 else
   echo "Tag created locally only."
+  echo "Push with: git push origin main"
   echo "Push with: git push origin $PATCH_TAG"
 fi
