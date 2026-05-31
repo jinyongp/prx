@@ -236,10 +236,9 @@ fi
 git tag -a "$PATCH_TAG" -m "Release $PATCH_TAG" "$TARGET_SHA"
 
 if confirm_push "$PATCH_TAG" "$AUTO_PUSH"; then
-  git push origin main "$PATCH_TAG"
-  echo "Pushed main and tag $PATCH_TAG"
+  git push --follow-tags
+  echo "Pushed branch and follow-up tag $PATCH_TAG"
 else
   echo "Tag created locally only."
-  echo "Push with: git push origin main"
-  echo "Push with: git push origin $PATCH_TAG"
+  echo "Push with: git push --follow-tags"
 fi
