@@ -179,8 +179,6 @@ if [ -n "${PRX_BIN_DIR:-}" ]; then
     exit 1
   fi
   DEST_DIR="${PRX_BIN_DIR}"
-elif [ -w /usr/local/bin ]; then
-  DEST_DIR="/usr/local/bin"
 elif [ -w "$HOME/.local/bin" ] || mkdir -p "$HOME/.local/bin"; then
   DEST_DIR="$HOME/.local/bin"
 else
@@ -199,3 +197,21 @@ else
 fi
 
 echo "Installed prx to ${DEST}"
+
+case ":${PATH}:" in
+  *":${DEST_DIR}:"*)
+    echo "prx is already in your current PATH"
+    ;;
+  *)
+    echo "PATH does not currently include ${DEST_DIR}"
+    echo "Run one of the following in your shell to use prx:"
+    echo "  export PATH=\"${DEST_DIR}:\$PATH\""
+    ;;
+esac
+
+resolved="$(command -v prx 2>/dev/null || true)"
+if [ -n "$resolved" ] && [ "$resolved" != "$DEST" ]; then
+  echo "warning: another prx is earlier in PATH and will shadow this install:"
+  echo "  ${resolved}"
+  echo "Remove it, or reorder PATH so ${DEST_DIR} comes first."
+fi
