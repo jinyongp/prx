@@ -577,7 +577,7 @@ $ prx add web.localhost 4310 --json
 curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/install.sh | sh
 ```
 
-- AI: `scripts/install-with-agent.md`의 지침을 따른다.
+- AI: `scripts/agent-bootstrap.md`의 지침을 따른다.
 
 설치 스크립트는 OS/CPU를 판별해서 릴리스 자산을 먼저 시도하고,
 받아오기를 실패하면 소스 빌드로 폴백한다.

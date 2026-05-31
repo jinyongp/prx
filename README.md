@@ -4,12 +4,12 @@ Local HTTPS reverse proxy and port registry for local development.
 
 ## Install
 
-### AI Agent bootstrap (recommended)
+### Agent bootstrap (recommended)
 
-Open the AI agent setup instructions directly:
+Open the agent setup instructions directly:
 
 ```
-https://raw.githubusercontent.com/jinyongp/prx/main/scripts/install-with-agent.md
+https://raw.githubusercontent.com/jinyongp/prx/main/scripts/agent-bootstrap.md
 ```
 
 ### Human install

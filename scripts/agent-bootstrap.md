@@ -1,6 +1,6 @@
-# prx AI Agent bootstrap
+# prx agent bootstrap
 
-Use this file when an AI Agent is setting up `prx` for a repository.
+Use this file when an AI agent is setting up `prx` for a repository.
 
 1) Install `prx` binary:
 
@@ -13,8 +13,10 @@ curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/install.s
 ```bash
 if command -v npx >/dev/null 2>&1; then
   npx skills add jinyongp/prx
-else
+elif command -v apm >/dev/null 2>&1; then
   apm install jinyongp/prx
+else
+  echo "No skill manager found (npx or apm); skip skill install and report this."
 fi
 ```
 
@@ -26,6 +28,11 @@ fi
   - `go.mod` projects → `8080` default
   - `docker-compose.yml`/`docker-compose.yaml` with mapped host port → use that port
   - fallback: `3000`
+- Convert the repo folder name to a DNS-safe label for the domain:
+  - lowercase
+  - replace every run of non-`[a-z0-9]` characters with `-`
+  - trim leading/trailing `-`
+  - fallback to `app` if the result is empty
 - Create `prx.toml` using the detected service name and port:
 
 ```toml
@@ -33,19 +40,25 @@ fi
 name = "<repo-folder-name>"
 
 [services.web]
-domain = "<repo-folder-name>.example.localhost"
-port = 3000
+domain = "<dns-safe-repo-name>.example.localhost"
+port = <detected-port>
 ```
 
-4) Suggest and run:
+4) Trust the local root CA once if the machine has not done it yet:
+
+```bash
+prx trust
+```
+
+5) Suggest and run:
 
 ```bash
 prx up
 ```
 
-5) Report where the install landed and what was detected.
+6) Report where the install landed and what was detected.
 
-6) When removing agent setup, run:
+7) When removing agent setup, run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/uninstall.sh | sh

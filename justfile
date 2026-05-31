@@ -51,7 +51,7 @@ vuln:
 scripts-check:
   #!/usr/bin/env bash
   set -euo pipefail
-  sh -n scripts/install.sh scripts/install-with-agent.sh scripts/uninstall.sh scripts/build-prx.sh
+  sh -n scripts/install.sh scripts/uninstall.sh scripts/build-prx.sh
   bash -n scripts/release-publish.sh
   if command -v shellcheck >/dev/null 2>&1; then
     shellcheck -S warning scripts/*.sh
