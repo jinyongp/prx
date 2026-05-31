@@ -5,6 +5,17 @@ DRY_RUN=0
 AUTO_PUSH=0
 TAG_INPUT=""
 
+SCRIPT_DIR="$(CDPATH="" cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+. "${SCRIPT_DIR}/../lib/ui.sh"
+
+abort_interrupted() {
+  printf '\n'
+  echo "Aborted."
+  exit 130
+}
+
+trap abort_interrupted INT
+
 for arg in "$@"; do
   if [ -z "$arg" ]; then
     continue
@@ -92,10 +103,10 @@ format_commits() {
 # run_checks runs the full gate quietly, collapsing its output to a single
 # status line on success and only surfacing the detail when something fails.
 run_checks() {
-  printf 'Running checks (test, lint, vuln)... '
+  printf '\nRunning checks (test, lint, vuln)... '
   local out
   if out="$(just check 2>&1)"; then
-    echo "ok"
+    ui_ok
   else
     echo "failed"
     printf '\n%s\n\n' "$out"
@@ -116,7 +127,7 @@ confirm_push() {
     return 1
   fi
 
-  printf "Push branch main and tag %s now? [Y/n]: " "$tag"
+  ui_prompt "Push branch main and tag ${tag} now? [Y/n]:"
   read -r response
   response="${response:-y}"
 
@@ -139,13 +150,14 @@ working_tree_changes() {
 confirm_dirty_tree() {
   local changes="$1"
 
-  echo "Working tree has uncommitted changes:"
+  ui_section "Uncommitted changes"
   printf '%s\n' "$changes" | sed 's/^/  /'
+  echo
 
   if [ "$DRY_RUN" -eq 1 ]; then
-    echo "This is a dry run; no tag or push will be created."
+    ui_dim "This is a dry run; no tag or push will be created."
   else
-    echo "Continuing will release the current HEAD only; uncommitted changes are not included."
+    ui_warn "continuing releases current HEAD only; uncommitted changes are not included."
   fi
 
   if [ "$AUTO_PUSH" -eq 1 ] || [ -n "${CI:-}" ]; then
@@ -153,7 +165,7 @@ confirm_dirty_tree() {
     exit 1
   fi
 
-  printf "Continue with dirty working tree? [y/N]: "
+  ui_prompt "Continue with dirty working tree? [y/N]:"
   if ! read -r response; then
     echo
     echo "No response; aborting release."
@@ -189,21 +201,24 @@ if [ -z "$TAG_INPUT" ]; then
     BASE_TAG="v0.0.0"
     LATEST_TAG="$BASE_TAG"
     RANGE=""
-    echo "No previous release tag found. This will create the first semver tag from v0.0.0."
-    echo "Commits since initial commit:"
+    ui_section "Release base"
+    printf '  No previous release tag found. First semver tag starts from v0.0.0.\n'
+    ui_section "Commits since initial commit"
     COMMITS="$(format_commits "")"
   else
     BASE_TAG="$LATEST_TAG"
     RANGE="${LATEST_TAG}..HEAD"
-    echo "Last release tag: $LATEST_TAG"
-    echo "Commits since $LATEST_TAG:"
+    ui_section "Release base"
+    ui_kv "Last tag" "$LATEST_TAG"
+    ui_section "Commits since $LATEST_TAG"
     COMMITS="$(format_commits "$RANGE")"
   fi
 
-  echo "$COMMITS" | sed 's/^/- /'
+  echo "$COMMITS" | sed 's/^/  - /'
   CHANGE_COUNT="$(printf '%s\n' "$COMMITS" | sed '/^$/d' | wc -l | tr -d ' ')"
 
   if [ "$CHANGE_COUNT" -eq 0 ]; then
+    echo
     echo "No commits to release."
     exit 0
   fi
@@ -213,14 +228,14 @@ if [ -z "$TAG_INPUT" ]; then
   MINOR_CANDIDATE="$(next_version "$BASE_MAJOR" "$BASE_MINOR" "$BASE_PATCH" minor)"
   MAJOR_CANDIDATE="$(next_version "$BASE_MAJOR" "$BASE_MINOR" "$BASE_PATCH" major)"
 
-  echo
-  echo "Commits to include: $CHANGE_COUNT"
-  echo "1) patch  -> $PATCH_CANDIDATE"
-  echo "2) minor  -> $MINOR_CANDIDATE"
-  echo "3) major  -> $MAJOR_CANDIDATE"
+  ui_section "Version bump"
+  ui_kv "Commits" "$CHANGE_COUNT"
+  printf '  [1] %-7s %s\n' "patch" "$PATCH_CANDIDATE"
+  printf '  [2] %-7s %s\n' "minor" "$MINOR_CANDIDATE"
+  printf '  [3] %-7s %s\n' "major" "$MAJOR_CANDIDATE"
 
   while true; do
-    printf "Select bump [1/2/3] (default: 1): "
+    ui_prompt "Select bump [1/2/3] (default: 1):"
     read -r REPLY
 
     case "${REPLY:-1}" in
@@ -254,10 +269,10 @@ else
     RANGE="${LATEST_TAG}..HEAD"
   fi
 
-  echo "Last release tag: $LATEST_TAG"
-  echo "Commits since $LATEST_TAG:"
-  format_commits "$RANGE" | sed 's/^/- /'
-  echo
+  ui_section "Release base"
+  ui_kv "Last tag" "$LATEST_TAG"
+  ui_section "Commits since $LATEST_TAG"
+  format_commits "$RANGE" | sed 's/^/  - /'
 fi
 
 case "$TAG_INPUT" in
@@ -276,7 +291,8 @@ case "$TAG_INPUT" in
 esac
 
 if [ "${TAG_INPUT}" != "${PATCH_TAG}" ]; then
-  echo "Resolved tag: ${PATCH_TAG} (from ${TAG_INPUT} bump)"
+  ui_section "Resolved version"
+  ui_kv "Tag" "${PATCH_TAG} (from ${TAG_INPUT} bump)"
 fi
 
 if [ "$(git symbolic-ref --short HEAD)" != "main" ]; then
@@ -287,17 +303,20 @@ fi
 TARGET_SHA="$(git rev-parse HEAD)"
 
 if git rev-parse -q --verify "refs/tags/$PATCH_TAG" >/dev/null; then
-  echo "Patch tag already exists: $PATCH_TAG"
+  echo "Tag already exists: $PATCH_TAG"
   exit 1
 fi
 
 if [ "$DRY_RUN" -eq 0 ] && git ls-remote --exit-code --tags origin "refs/tags/$PATCH_TAG" >/dev/null 2>&1; then
-  echo "Remote patch tag already exists: $PATCH_TAG"
+  echo "Remote tag already exists: $PATCH_TAG"
   exit 1
 fi
 
 if [ "$DRY_RUN" -eq 1 ]; then
-  echo "DRY-RUN: would create and push tag $PATCH_TAG at $TARGET_SHA"
+  ui_section "Dry run"
+  ui_kv "Tag" "$PATCH_TAG"
+  ui_kv "Target" "$TARGET_SHA"
+  echo "  No tag or push was created."
   exit 0
 fi
 

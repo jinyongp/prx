@@ -4,13 +4,24 @@ set -eu
 VERSION="${PRX_VERSION:-latest}"
 REPO="jinyongp/prx"
 
+SCRIPT_DIR="$(CDPATH="" cd "$(dirname "$0")" 2>/dev/null && pwd || pwd)"
+if [ -r "${SCRIPT_DIR}/lib/ui.sh" ]; then
+  . "${SCRIPT_DIR}/lib/ui.sh"
+else
+  ui_section() { printf '\n%s\n' "$1"; }
+  ui_kv() { printf '  %-12s %s\n' "$1" "$2"; }
+  ui_ok() { printf 'ok: %s\n' "$1"; }
+  ui_warn_err() { printf 'warning: %s\n' "$1" >&2; }
+  ui_error() { printf 'error: %s\n' "$1" >&2; }
+fi
+
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
 ARCH_RAW="$(uname -m)"
 
 case "$OS" in
   darwin|linux) ;;
   *)
-    echo "Unsupported OS: $OS" >&2
+    ui_error "unsupported OS: $OS"
     echo "supported OS: darwin, linux" >&2
     exit 1
     ;;
@@ -22,14 +33,14 @@ case "$ARCH_RAW" in
   arm64|aarch64)
     ARCH="arm64" ;;
   *)
-    echo "Unsupported architecture: $ARCH_RAW" >&2
+    ui_error "unsupported architecture: $ARCH_RAW"
     echo "supported architecture: amd64, arm64" >&2
     exit 1
     ;;
 esac
 
 if ! command -v curl >/dev/null 2>&1; then
-  echo "Error: curl is required for installation." >&2
+  ui_error "curl is required for installation."
   exit 1
 fi
 
@@ -53,7 +64,7 @@ resolve_download_url() {
 
   RELEASE_JSON="${TMP_DIR}/release.json"
   if ! curl -fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: prx-install" "$API_URL" > "$RELEASE_JSON"; then
-    echo "Failed to read release metadata from GitHub." >&2
+    ui_error "failed to read release metadata from GitHub."
     return 1
   fi
 
@@ -76,13 +87,13 @@ resolve_download_url() {
 
 build_from_source() {
   if ! command -v git >/dev/null 2>&1; then
-    echo "No prebuilt release was found and 'git' is missing." >&2
+    ui_error "no prebuilt release was found and 'git' is missing."
     echo "Install git, or publish a release with artifacts for ${BINARY_NAME}." >&2
     return 1
   fi
 
   if ! command -v go >/dev/null 2>&1; then
-    echo "No prebuilt release was found and 'go' is missing." >&2
+    ui_error "no prebuilt release was found and 'go' is missing."
     echo "Install Go, or publish a release with artifacts for ${BINARY_NAME}." >&2
     return 1
   fi
@@ -92,17 +103,17 @@ build_from_source() {
 
   if [ "$VERSION" = "latest" ]; then
     if ! git clone --quiet --depth 1 "$CLONE_URL" "$SOURCE_DIR" >/dev/null 2>&1; then
-      echo "Failed to clone ${REPO} (latest)" >&2
+      ui_error "failed to clone ${REPO} (latest)"
       return 1
     fi
   else
     if ! git clone --quiet --depth 1 --branch "$VERSION" "$CLONE_URL" "$SOURCE_DIR" >/dev/null 2>&1; then
       if ! git clone --quiet --depth 1 "$CLONE_URL" "$SOURCE_DIR" >/dev/null 2>&1; then
-        echo "Failed to clone ${REPO} for tag ${VERSION}" >&2
+        ui_error "failed to clone ${REPO} for tag ${VERSION}"
         return 1
       fi
       if ! (cd "$SOURCE_DIR" && git checkout "$VERSION" >/dev/null 2>&1); then
-        echo "Release version ${VERSION} not found (tag or branch)." >&2
+        ui_error "release version ${VERSION} not found (tag or branch)."
         return 1
       fi
     fi
@@ -114,7 +125,7 @@ build_from_source() {
   fi
 
   if ! (cd "$SOURCE_DIR" && go build -trimpath -ldflags "-s -w -X main.version=${build_version}" -o "$BINARY_PATH" ./cmd/prx); then
-    echo "Failed to build prx from source." >&2
+    ui_error "failed to build prx from source."
     return 1
   fi
 
@@ -123,20 +134,20 @@ build_from_source() {
 
 verify_checksum() {
   if [ -z "${CHECKSUMS_URL:-}" ]; then
-    echo "Warning: release has no checksums.txt; skipping integrity check." >&2
+    ui_warn_err "release has no checksums.txt; skipping integrity check."
     return 0
   fi
 
   CHECKSUMS_FILE="${TMP_DIR}/checksums.txt"
   if ! curl -fsSL "$CHECKSUMS_URL" -o "$CHECKSUMS_FILE"; then
-    echo "Error: failed to download checksums.txt; refusing to install unverified binary." >&2
+    ui_error "failed to download checksums.txt; refusing to install unverified binary."
     return 1
   fi
 
   asset_name="$(basename "$DOWNLOAD_URL")"
   expected="$(awk -v f="$asset_name" '$2 == f || $2 == "*"f {print $1; exit}' "$CHECKSUMS_FILE")"
   if [ -z "$expected" ]; then
-    echo "Error: no checksum entry for ${asset_name}; refusing to install unverified binary." >&2
+    ui_error "no checksum entry for ${asset_name}; refusing to install unverified binary."
     return 1
   fi
 
@@ -145,18 +156,18 @@ verify_checksum() {
   elif command -v shasum >/dev/null 2>&1; then
     actual="$(shasum -a 256 "$BINARY_PATH" | awk '{print $1}')"
   else
-    echo "Error: no sha256 tool found (sha256sum/shasum); refusing to install unverified binary." >&2
+    ui_error "no sha256 tool found (sha256sum/shasum); refusing to install unverified binary."
     return 1
   fi
 
   if [ "$actual" != "$expected" ]; then
-    echo "Checksum verification failed for ${asset_name}." >&2
+    ui_error "checksum verification failed for ${asset_name}."
     echo "  expected: ${expected}" >&2
     echo "  actual:   ${actual}" >&2
     return 1
   fi
 
-  echo "Verified checksum for ${asset_name}."
+  ui_ok "verified checksum for ${asset_name}."
   return 0
 }
 
@@ -171,21 +182,21 @@ else
 fi
 
 if [ ! -f "$BINARY_PATH" ]; then
-  echo "No installable binary found." >&2
+  ui_error "no installable binary found."
   exit 1
 fi
 chmod +x "$BINARY_PATH"
 
 if [ -n "${PRX_BIN_DIR:-}" ]; then
   if ! mkdir -p "${PRX_BIN_DIR}" 2>/dev/null || [ ! -w "${PRX_BIN_DIR}" ]; then
-    echo "Error: PRX_BIN_DIR is set but not writable: ${PRX_BIN_DIR}" >&2
+    ui_error "PRX_BIN_DIR is set but not writable: ${PRX_BIN_DIR}"
     exit 1
   fi
   DEST_DIR="${PRX_BIN_DIR}"
 elif [ -w "$HOME/.local/bin" ] || mkdir -p "$HOME/.local/bin"; then
   DEST_DIR="$HOME/.local/bin"
 else
-  echo "Error: no writable install directory found." >&2
+  ui_error "no writable install directory found."
   echo "Grant permissions or use a custom destination in your shell manually." >&2
   exit 1
 fi
@@ -199,14 +210,15 @@ else
   chmod 755 "$DEST"
 fi
 
-echo "Installed prx to ${DEST}"
+ui_section "Install complete"
+ui_kv "Binary" "$DEST"
 
 case ":${PATH}:" in
   *":${DEST_DIR}:"*)
-    echo "prx is already in your current PATH"
+    ui_ok "prx is already in your current PATH."
     ;;
   *)
-    echo "PATH does not currently include ${DEST_DIR}"
+    ui_warn_err "PATH does not currently include ${DEST_DIR}."
     echo "Run one of the following in your shell to use prx:"
     echo "  export PATH=\"${DEST_DIR}:\$PATH\""
     ;;
@@ -214,7 +226,7 @@ esac
 
 resolved="$(command -v prx 2>/dev/null || true)"
 if [ -n "$resolved" ] && [ "$resolved" != "$DEST" ]; then
-  echo "warning: another prx is earlier in PATH and will shadow this install:"
+  ui_warn_err "another prx is earlier in PATH and will shadow this install:"
   echo "  ${resolved}"
   echo "Remove it, or reorder PATH so ${DEST_DIR} comes first."
 fi

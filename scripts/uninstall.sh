@@ -8,6 +8,16 @@ WORKFILE="$(mktemp)"
 SORTED_FILE="${WORKFILE}.sorted"
 trap 'rm -f "$WORKFILE" "$SORTED_FILE"' EXIT
 
+SCRIPT_DIR="$(CDPATH="" cd "$(dirname "$0")" 2>/dev/null && pwd || pwd)"
+if [ -r "${SCRIPT_DIR}/lib/ui.sh" ]; then
+  . "${SCRIPT_DIR}/lib/ui.sh"
+else
+  ui_section() { printf '\n%s\n' "$1"; }
+  ui_ok() { printf 'ok: %s\n' "$1"; }
+  ui_error() { printf 'error: %s\n' "$1" >&2; }
+  ui_prompt() { printf '\n%s ' "$1"; }
+fi
+
 for arg in "$@"; do
   case "$arg" in
     -y|--yes|--force)
@@ -18,7 +28,7 @@ for arg in "$@"; do
       exit 0
       ;;
     *)
-      echo "Unsupported argument: $arg" >&2
+      ui_error "unsupported argument: $arg"
       exit 1
       ;;
   esac
@@ -84,11 +94,11 @@ collect_paths() {
 collect_paths
 sort -u "$WORKFILE" > "$SORTED_FILE"
 if [ -s "$SORTED_FILE" ]; then
-  printf 'Discovered prx artifacts. Only existing discovered paths will be removed:\n'
+  ui_section "Discovered artifacts"
+  printf '  Only existing discovered paths will be removed:\n'
   sed 's/^/  - /' "$SORTED_FILE"
   if [ "$FORCE" -ne 1 ]; then
-    echo
-    printf 'Type y to proceed, anything else to cancel [y/N]: '
+    ui_prompt "Type y to proceed, anything else to cancel [y/N]:"
     if ! read -r response; then
       echo "Uninstall canceled."
       exit 0
@@ -118,7 +128,7 @@ stop_daemon() {
     case "$args" in
       prx\ __serve*|*/prx\ __serve*) ;;
       *)
-        echo "Skipping daemon stop for stale/non-prx pid: $PID" >&2
+        ui_error "skipping daemon stop for stale/non-prx pid: $PID"
         return
         ;;
     esac
@@ -143,17 +153,18 @@ while IFS= read -r target; do
   fi
 
   if [ "$status" = "0" ]; then
-    echo "Removed: $target"
+    ui_ok "removed $target"
     FOUND=1
   else
     if [ -e "$target" ] || [ -L "$target" ]; then
-      echo "Failed to remove: $target"
+      ui_error "failed to remove: $target"
       FAILED=1
     fi
   fi
 done < "$SORTED_FILE"
 
 if [ "$FOUND" -eq 0 ]; then
+  ui_section "Uninstall complete"
   echo "No prx installation artifacts found."
   exit 0
 fi
@@ -166,8 +177,9 @@ if command -v hash >/dev/null 2>&1; then
 fi
 
 if [ "$FAILED" -eq 1 ]; then
-  echo "prx uninstall completed with errors."
+  ui_error "prx uninstall completed with errors."
   exit 1
 fi
 
-echo "prx uninstalled."
+ui_section "Uninstall complete"
+ui_ok "prx uninstalled."
