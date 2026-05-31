@@ -42,7 +42,7 @@ fmt:
 check: test lint vuln
 
 [doc('release a new version: no arg => interactive patch/minor/major; patch/minor/major -> bump from latest tag; explicit vX.Y.Z')]
-release tag="": check
+release tag="":
   ./scripts/release-publish.sh "{{tag}}"
 
 [doc('cross-compile all release targets into bin/')]

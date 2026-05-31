@@ -83,6 +83,21 @@ format_commits() {
   fi
 }
 
+# run_checks runs the full gate quietly, collapsing its output to a single
+# status line on success and only surfacing the detail when something fails.
+run_checks() {
+  printf 'Running checks (test, lint, vuln)... '
+  local out
+  if out="$(just check 2>&1)"; then
+    echo "ok"
+  else
+    echo "failed"
+    printf '\n%s\n\n' "$out"
+    echo "Checks failed; aborting release."
+    exit 1
+  fi
+}
+
 confirm_push() {
   local tag="$1"
   local auto="$2"
@@ -130,7 +145,7 @@ if [ -z "$TAG_INPUT" ]; then
   fi
 
   echo "$COMMITS" | sed 's/^/- /'
-  CHANGE_COUNT="$(printf "%s" "$COMMITS" | sed '/^$/d' | wc -l | tr -d ' ')"
+  CHANGE_COUNT="$(printf '%s\n' "$COMMITS" | sed '/^$/d' | wc -l | tr -d ' ')"
 
   if [ "$CHANGE_COUNT" -eq 0 ]; then
     echo "No commits to release."
@@ -238,6 +253,8 @@ if [ "$DRY_RUN" -eq 1 ]; then
   echo "DRY-RUN: would create and push tag $PATCH_TAG at $TARGET_SHA"
   exit 0
 fi
+
+run_checks
 
 if ! confirm_push "$PATCH_TAG" "$AUTO_PUSH"; then
   echo "Aborted. No tag created."
