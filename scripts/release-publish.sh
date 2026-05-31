@@ -34,11 +34,6 @@ for arg in "$@"; do
   esac
 done
 
-INTERACTIVE=1
-if [ -n "$TAG_INPUT" ]; then
-  INTERACTIVE=0
-fi
-
 get_latest_tag() {
   git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -n 1
 }
