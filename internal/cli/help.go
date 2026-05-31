@@ -127,7 +127,11 @@ func WriteHelp(w io.Writer, name, args, summary string, flags []FlagInfo) {
 			if f.Default != "" && f.Default != "false" && f.Default != "0" {
 				desc = fmt.Sprintf("%s (default %q)", desc, f.Default)
 			}
-			fmt.Fprintf(tw, "  --%s\t%s\n", f.Name, desc)
+			dash := "--"
+			if len(f.Name) == 1 {
+				dash = "-"
+			}
+			fmt.Fprintf(tw, "  %s%s\t%s\n", dash, f.Name, desc)
 		}
 		_ = tw.Flush()
 	}

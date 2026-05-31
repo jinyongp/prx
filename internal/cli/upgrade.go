@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"context"
 	"encoding/json"
 	"flag"
@@ -30,6 +31,9 @@ func SetVersion(v string) {
 // prx binary with the latest release.
 func Upgrade(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
+	var yes bool
+	fs.BoolVar(&yes, "yes", false, "upgrade without the confirmation prompt")
+	fs.BoolVar(&yes, "y", false, "upgrade without the confirmation prompt (shorthand)")
 	if handled, code := parseFlags(fs, "upgrade", args, stdout, stderr); handled {
 		return code
 	}
@@ -41,15 +45,24 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 	defer cancel()
 
 	latestTag, err := latestReleaseTag(ctx)
-	if err == nil {
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "warning: unable to check latest version: %v\n", err)
+	}
+
+	fmt.Fprintf(stdout, "Current version: %s\n", currentVersion)
+	if latestTag != "" {
+		fmt.Fprintf(stdout, "Latest version:  %s\n", latestTag)
 		if current := normalizedVersion(currentVersion); current != "" && current != "dev" {
-			if latest := normalizedVersion(latestTag); latest == current {
-				fmt.Fprintf(stdout, "prx is already up to date (%s)\n", latestTag)
+			if normalizedVersion(latestTag) == current {
+				fmt.Fprintln(stdout, "Already up to date.")
 				return ExitOK
 			}
 		}
-	} else {
-		_, _ = fmt.Fprintf(stderr, "warning: unable to check latest version: %v\n", err)
+	}
+
+	if !yes && !confirmUpgrade(stdout, currentVersion, latestTag) {
+		fmt.Fprintln(stdout, "Upgrade cancelled.")
+		return ExitOK
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upgradeScriptURL, nil)
@@ -95,6 +108,27 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 	}
 	fmt.Fprintln(stdout, "upgrade complete")
 	return ExitOK
+}
+
+// confirmUpgrade asks the user to confirm the upgrade on stdin. An empty line
+// (just Enter) accepts; EOF / no input declines so non-interactive callers that
+// forgot -y don't silently upgrade.
+func confirmUpgrade(stdout io.Writer, current, latest string) bool {
+	if latest != "" {
+		fmt.Fprintf(stdout, "Upgrade %s -> %s? [Y/n]: ", current, latest)
+	} else {
+		fmt.Fprintf(stdout, "Upgrade prx to the latest release? [Y/n]: ")
+	}
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil && line == "" {
+		return false
+	}
+	switch strings.ToLower(strings.TrimSpace(line)) {
+	case "", "y", "yes":
+		return true
+	default:
+		return false
+	}
 }
 
 type githubRelease struct {
