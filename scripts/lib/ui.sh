@@ -22,6 +22,7 @@ if [ "$UI_COLOR" -eq 1 ]; then
   UI_GREEN="$(printf '\033[32m')"
   UI_RED="$(printf '\033[31m')"
   UI_YELLOW="$(printf '\033[33m')"
+  UI_CYAN="$(printf '\033[36m')"
   UI_RESET="$(printf '\033[0m')"
 else
   UI_BOLD=""
@@ -29,6 +30,7 @@ else
   UI_GREEN=""
   UI_RED=""
   UI_YELLOW=""
+  UI_CYAN=""
   UI_RESET=""
 fi
 
@@ -68,4 +70,4 @@ ui_prompt() {
   printf '\n%s%s%s ' "$UI_BOLD" "$1" "$UI_RESET"
 }
 
-export UI_COLOR UI_BOLD UI_DIM UI_GREEN UI_RED UI_YELLOW UI_RESET
+export UI_COLOR UI_BOLD UI_DIM UI_GREEN UI_RED UI_YELLOW UI_CYAN UI_RESET

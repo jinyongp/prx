@@ -4,17 +4,34 @@ set -euo pipefail
 DRY_RUN=0
 AUTO_PUSH=0
 TAG_INPUT=""
+CURSOR_HIDDEN=0
 
 SCRIPT_DIR="$(CDPATH="" cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 . "${SCRIPT_DIR}/../lib/ui.sh"
 
+hide_cursor() {
+  if [ -t 1 ] && [ "$CURSOR_HIDDEN" -eq 0 ]; then
+    printf '\033[?25l'
+    CURSOR_HIDDEN=1
+  fi
+}
+
+show_cursor() {
+  if [ "$CURSOR_HIDDEN" -eq 1 ]; then
+    printf '\033[?25h'
+    CURSOR_HIDDEN=0
+  fi
+}
+
 abort_interrupted() {
+  show_cursor
   printf '\n'
   echo "Aborted."
   exit 130
 }
 
 trap abort_interrupted INT
+trap show_cursor EXIT
 
 for arg in "$@"; do
   if [ -z "$arg" ]; then
@@ -97,6 +114,259 @@ format_commits() {
     git log --oneline --no-decorate
   else
     git log --oneline --no-decorate "$range"
+  fi
+}
+
+recommended_bump() {
+  local range="$1"
+  local messages
+  local subjects
+
+  messages="$(git log --format='%s%n%b' "$range")"
+  subjects="$(git log --format='%s' "$range")"
+
+  if grep -Eq '(^|[[:space:]])BREAKING CHANGE:|^[a-zA-Z]+([(][^)]*[)])?!:' <<<"$messages"; then
+    echo "major"
+    return
+  fi
+
+  if grep -Eq '^feat([(][^)]*[)])?:' <<<"$subjects"; then
+    echo "minor"
+    return
+  fi
+
+  echo "patch"
+}
+
+first_match() {
+  local input="$1"
+  local pattern="$2"
+
+  awk -v pattern="$pattern" '$0 ~ pattern && !found { print; found = 1 }' <<<"$input"
+}
+
+recommended_reason() {
+  local range="$1"
+  local bump="$2"
+  local lines
+  local messages
+  local match
+
+  lines="$(git log --format='%h %s' "$range")"
+  messages="$(git log --format='%h %s%n%b' "$range")"
+
+  case "$bump" in
+    major)
+      match="$(first_match "$lines" '^[^ ]+ [a-zA-Z]+([(][^)]*[)])?!:')"
+      if [ -n "$match" ]; then
+        echo "$match"
+        return
+      fi
+      match="$(first_match "$messages" 'BREAKING CHANGE:')"
+      if [ -n "$match" ]; then
+        echo "$match"
+        return
+      fi
+      ;;
+    minor)
+      match="$(first_match "$lines" '^[^ ]+ feat([(][^)]*[)])?:')"
+      if [ -n "$match" ]; then
+        echo "$match"
+        return
+      fi
+      ;;
+    *)
+      first_match "$lines" '.'
+      return
+      ;;
+  esac
+}
+
+bump_index() {
+  case "$1" in
+    patch) echo "0" ;;
+    minor) echo "1" ;;
+    major) echo "2" ;;
+    *) echo "0" ;;
+  esac
+}
+
+bump_from_index() {
+  case "$1" in
+    0) echo "patch" ;;
+    1) echo "minor" ;;
+    2) echo "major" ;;
+    *) echo "patch" ;;
+  esac
+}
+
+candidate_for_bump() {
+  case "$1" in
+    patch) echo "$PATCH_CANDIDATE" ;;
+    minor) echo "$MINOR_CANDIDATE" ;;
+    major) echo "$MAJOR_CANDIDATE" ;;
+    *) echo "$PATCH_CANDIDATE" ;;
+  esac
+}
+
+render_bump_option() {
+  local index="$1"
+  local selected="$2"
+  local bump
+  local marker="${UI_DIM}○${UI_RESET}"
+  local bump_label
+  local bump_pad
+  local version
+  local suffix=""
+
+  bump="$(bump_from_index "$index")"
+  bump_label="$bump"
+  version="$(candidate_for_bump "$bump")"
+  if [ "$index" -eq "$selected" ]; then
+    marker="${UI_GREEN}●${UI_RESET}"
+    bump_label="${UI_BOLD}${bump}${UI_RESET}"
+    version="${UI_CYAN}${version}${UI_RESET}"
+  fi
+  if [ "$bump" = "$RECOMMENDED_BUMP" ]; then
+    suffix="  ${UI_GREEN}recommended${UI_RESET}"
+  fi
+  printf -v bump_pad '%*s' $((8 - ${#bump})) ''
+
+  printf '  %s  %s%s %s%s\033[K\n' "$marker" "$bump_label" "$bump_pad" "$version" "$suffix"
+}
+
+render_bump_menu() {
+  local selected="$1"
+
+  render_bump_option 0 "$selected"
+  render_bump_option 1 "$selected"
+  render_bump_option 2 "$selected"
+}
+
+update_bump_option() {
+  local index
+  local selected
+  local up
+
+  index="$1"
+  selected="$2"
+  up=$((3 - index))
+
+  printf '\033[%dA' "$up"
+  render_bump_option "$index" "$selected"
+  if [ "$up" -gt 1 ]; then
+    printf '\033[%dB' $((up - 1))
+  fi
+}
+
+select_bump_text() {
+  local reply
+
+  while true; do
+    ui_prompt "Select bump [patch/minor/major] (default: ${RECOMMENDED_BUMP}):"
+    read -r reply
+
+    case "${reply:-$RECOMMENDED_BUMP}" in
+      patch|1)
+        SELECTED_BUMP="patch"
+        return
+        ;;
+      minor|2)
+        SELECTED_BUMP="minor"
+        return
+        ;;
+      major|3)
+        SELECTED_BUMP="major"
+        return
+        ;;
+      *)
+        echo "Please enter patch, minor, or major."
+        ;;
+    esac
+  done
+}
+
+select_bump_radio() {
+  local selected
+  local previous
+  local key
+  local rest
+
+  if [ ! -t 0 ] || [ ! -t 1 ] || [ "${TERM:-dumb}" = "dumb" ]; then
+    return 1
+  fi
+
+  selected="$(bump_index "$RECOMMENDED_BUMP")"
+  printf '  Use arrow keys and Enter.\n'
+  hide_cursor
+  render_bump_menu "$selected"
+
+  while IFS= read -rsn1 key; do
+    previous="$selected"
+
+    case "$key" in
+      "")
+        break
+        ;;
+      $'\033')
+        if IFS= read -rsn2 -t 1 rest; then
+          case "$rest" in
+            "[A")
+              selected=$(((selected + 2) % 3))
+              ;;
+            "[B")
+              selected=$(((selected + 1) % 3))
+              ;;
+          esac
+        fi
+        ;;
+      j)
+        selected=$(((selected + 1) % 3))
+        ;;
+      k)
+        selected=$(((selected + 2) % 3))
+        ;;
+      1)
+        selected=0
+        break
+        ;;
+      2)
+        selected=1
+        break
+        ;;
+      3)
+        selected=2
+        break
+        ;;
+      p)
+        selected=0
+        break
+        ;;
+      m)
+        selected=1
+        break
+        ;;
+      M)
+        selected=2
+        break
+        ;;
+    esac
+
+    if [ "$selected" -ne "$previous" ]; then
+      update_bump_option "$previous" "$selected"
+      update_bump_option "$selected" "$selected"
+    fi
+  done
+
+  SELECTED_BUMP="$(bump_from_index "$selected")"
+  show_cursor
+}
+
+select_bump() {
+  SELECTED_BUMP=""
+
+  if ! select_bump_radio; then
+    select_bump_text
   fi
 }
 
@@ -227,38 +497,19 @@ if [ -z "$TAG_INPUT" ]; then
   PATCH_CANDIDATE="$(next_version "$BASE_MAJOR" "$BASE_MINOR" "$BASE_PATCH" patch)"
   MINOR_CANDIDATE="$(next_version "$BASE_MAJOR" "$BASE_MINOR" "$BASE_PATCH" minor)"
   MAJOR_CANDIDATE="$(next_version "$BASE_MAJOR" "$BASE_MINOR" "$BASE_PATCH" major)"
+  RECOMMENDED_BUMP="$(recommended_bump "$RANGE")"
+  RECOMMENDED_REASON="$(recommended_reason "$RANGE" "$RECOMMENDED_BUMP")"
 
   ui_section "Version bump"
   ui_kv "Commits" "$CHANGE_COUNT"
-  printf '  [1] %-7s %s\n' "patch" "$PATCH_CANDIDATE"
-  printf '  [2] %-7s %s\n' "minor" "$MINOR_CANDIDATE"
-  printf '  [3] %-7s %s\n' "major" "$MAJOR_CANDIDATE"
+  ui_kv "Recommended" "$RECOMMENDED_BUMP"
+  if [ -n "$RECOMMENDED_REASON" ]; then
+    ui_kv "Reason" "$RECOMMENDED_REASON"
+  fi
 
-  while true; do
-    ui_prompt "Select bump [1/2/3] (default: 1):"
-    read -r REPLY
-
-    case "${REPLY:-1}" in
-      1|patch)
-        TAG_INPUT="patch"
-        PATCH_TAG="$PATCH_CANDIDATE"
-        break
-        ;;
-      2|minor)
-        TAG_INPUT="minor"
-        PATCH_TAG="$MINOR_CANDIDATE"
-        break
-        ;;
-      3|major)
-        TAG_INPUT="major"
-        PATCH_TAG="$MAJOR_CANDIDATE"
-        break
-        ;;
-      *)
-        echo "Please enter 1, 2, or 3 (or patch/minor/major)."
-        ;;
-    esac
-  done
+  select_bump
+  TAG_INPUT="$SELECTED_BUMP"
+  PATCH_TAG="$(candidate_for_bump "$TAG_INPUT")"
 else
   LATEST_TAG="$(get_latest_tag)"
 
