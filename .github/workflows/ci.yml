@@ -3,10 +3,11 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ["v*"]
   pull_request:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   check:
@@ -55,3 +56,22 @@ jobs:
             prx-darwin-arm64
             prx-linux-amd64
             prx-linux-arm64
+      - name: checksums
+        if: github.ref_type == 'tag'
+        run: |
+          sha256sum prx-darwin-amd64 prx-darwin-arm64 prx-linux-amd64 prx-linux-arm64 > checksums.txt
+      - name: publish release
+        if: github.ref_type == 'tag'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" prx-* checksums.txt --clobber
+          else
+            gh release create "$TAG" \
+              prx-darwin-amd64 prx-darwin-arm64 prx-linux-amd64 prx-linux-arm64 checksums.txt \
+              --title "$TAG" \
+              --notes "Release $TAG" \
+              --verify-tag
+          fi
