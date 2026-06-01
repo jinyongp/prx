@@ -8,7 +8,23 @@ Use this file when an AI agent is setting up `prx` for a repository.
 curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/install.sh | sh
 ```
 
-2) Install the agent skill:
+2) Resolve the installed binary path. Agent sessions may not have
+`$HOME/.local/bin` in `PATH`, so do not assume `prx` is directly executable:
+
+```bash
+if command -v prx >/dev/null 2>&1; then
+  PRX_BIN="$(command -v prx)"
+elif [ -x "$HOME/.local/bin/prx" ]; then
+  PRX_BIN="$HOME/.local/bin/prx"
+else
+  echo "prx installed but not found; check installer output." >&2
+  exit 1
+fi
+```
+
+Use `"$PRX_BIN"` for every later `prx` command in this bootstrap.
+
+3) Install the agent skill:
 
 ```bash
 if command -v npx >/dev/null 2>&1; then
@@ -20,7 +36,7 @@ else
 fi
 ```
 
-3) Add `prx.toml` from project context:
+4) Add `prx.toml` from project context:
 
 - If `prx.toml` already exists, keep it and do not overwrite it.
 - If missing, inspect the project and infer the dev port:
@@ -44,21 +60,21 @@ domain = "<dns-safe-repo-name>.example.localhost"
 port = <detected-port>
 ```
 
-4) Trust the local root CA once if the machine has not done it yet:
+5) Trust the local root CA once if the machine has not done it yet:
 
 ```bash
-prx trust
+"$PRX_BIN" trust
 ```
 
-5) Suggest and run:
+6) Suggest and run:
 
 ```bash
-prx up
+"$PRX_BIN" up
 ```
 
-6) Report where the install landed and what was detected.
+7) Report `PRX_BIN`, where the install landed, and what was detected.
 
-7) When removing agent setup, run:
+8) When removing agent setup, run:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/uninstall.sh | sh
