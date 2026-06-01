@@ -216,11 +216,14 @@ func Down(args []string, stdout, stderr io.Writer) int {
 }
 
 func resolvePort(reg *registry.Registry, project, name string, svc config.Service, used map[int]bool) (int, bool, error) {
+	if svc.Port != 0 {
+		if existing, ok := reg.Get(registry.Key(project, name)); ok && existing.Port == svc.Port {
+			return existing.Port, false, nil
+		}
+		return svc.Port, true, nil
+	}
 	if existing, ok := reg.Get(registry.Key(project, name)); ok && existing.Port != 0 {
 		return existing.Port, false, nil
-	}
-	if svc.Port != 0 {
-		return svc.Port, true, nil
 	}
 	p, err := port.Allocate(port.DefaultPool, used)
 	return p, true, err

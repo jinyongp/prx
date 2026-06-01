@@ -74,6 +74,34 @@ func TestUpIsStablePort(t *testing.T) {
 	}
 }
 
+func TestUpUpdatesExistingFixedPort(t *testing.T) {
+	setupUpProject(t)
+	if err := registryStore().Update(func(reg *registry.Registry) error {
+		return reg.Reserve(registry.Reservation{
+			Project: "demo",
+			Service: "api",
+			Domain:  "api.demo.localhost",
+			Port:    4301,
+			Active:  true,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Up(nil, &out, &errb); code != ExitOK {
+		t.Fatalf("Up exit = %d, stderr=%s", code, errb.String())
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	api, ok := reg.Get(registry.Key("demo", "api"))
+	if !ok || api.Port != 4501 {
+		t.Fatalf("api should update to fixed port 4501: %+v", api)
+	}
+}
+
 func TestUpPrunesMissingConfigReservationBeforeConflict(t *testing.T) {
 	setupUpProject(t)
 	missing := filepath.Join(t.TempDir(), "missing", "prx.toml")
