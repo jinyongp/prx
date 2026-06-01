@@ -16,6 +16,22 @@ errors use a stderr envelope.
 - You need a stable, non-conflicting port for a dev server.
 - You need to bring routes up/down or check what is mapped.
 
+## Binary resolution
+
+Agent sessions may not have `$HOME/.local/bin` in `PATH`. Before running `prx`,
+resolve the executable once and use `"$PRX_BIN"` for later commands:
+
+```bash
+if command -v prx >/dev/null 2>&1; then
+  PRX_BIN="$(command -v prx)"
+elif [ -x "$HOME/.local/bin/prx" ]; then
+  PRX_BIN="$HOME/.local/bin/prx"
+else
+  echo "prx not found; install it or report the missing binary." >&2
+  exit 1
+fi
+```
+
 ## Core commands
 
 | command | purpose |
@@ -45,20 +61,20 @@ errors use a stderr envelope.
 Start a dev server on its assigned port:
 
 ```bash
-prx up
-prx run web -- pnpm dev          # PORT is injected
+"$PRX_BIN" up
+"$PRX_BIN" run web -- pnpm dev   # PORT is injected
 ```
 
 Get a port for a script:
 
 ```bash
-PORT=$(prx port web) pnpm dev
+PORT=$("$PRX_BIN" port web) pnpm dev
 ```
 
 Inspect mappings as JSON:
 
 ```bash
-prx ls --json
+"$PRX_BIN" ls --json
 ```
 
 JSON-mode errors are written to stderr:
