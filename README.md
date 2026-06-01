@@ -100,7 +100,15 @@ bin/prx trust
 
 This installs prx's local CA into the OS/browser trust store. It may ask for administrator approval. Restart the browser if the warning remains.
 
-4. For your own project, add `prx.toml` in its root — run the checkout-local binary with `init` to scaffold one, or write it manually:
+4. For your own project, add `prx.toml` in its root — run the checkout-local binary with `init` to scaffold one interactively, or use `init -y` for defaults:
+
+```bash
+/path/to/prx/bin/prx init
+# or non-interactive default
+/path/to/prx/bin/prx init -y
+```
+
+You can also write it manually:
 
 ```toml
 [project]

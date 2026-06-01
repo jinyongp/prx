@@ -3,6 +3,7 @@ package cli
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -13,7 +14,7 @@ func TestInitCreatesValidConfig(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	var out, errb bytes.Buffer
-	if code := Init([]string{"--name", "demo"}, &out, &errb); code != ExitOK {
+	if code := Init([]string{"-y", "--name", "demo"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Init exit = %d, stderr=%s", code, errb.String())
 	}
 	path := filepath.Join(dir, config.Filename)
@@ -34,13 +35,13 @@ func TestInitNoClobber(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	var out, errb bytes.Buffer
-	if code := Init(nil, &out, &errb); code != ExitOK {
+	if code := Init([]string{"-y"}, &out, &errb); code != ExitOK {
 		t.Fatalf("first Init exit = %d", code)
 	}
-	if code := Init(nil, &out, &errb); code != ExitError {
+	if code := Init([]string{"-y"}, &out, &errb); code != ExitError {
 		t.Fatalf("second Init exit = %d, want error (no clobber)", code)
 	}
-	if code := Init([]string{"--force"}, &out, &errb); code != ExitOK {
+	if code := Init([]string{"-y", "--force"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Init --force exit = %d", code)
 	}
 }
@@ -49,7 +50,7 @@ func TestInitJSON(t *testing.T) {
 	dir := t.TempDir()
 	t.Chdir(dir)
 	var out, errb bytes.Buffer
-	if code := Init([]string{"--json", "--name", "My App"}, &out, &errb); code != ExitOK {
+	if code := Init([]string{"--json", "-y", "--name", "My App"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Init --json exit = %d", code)
 	}
 	var got struct {
@@ -69,5 +70,39 @@ func TestInitJSON(t *testing.T) {
 	}
 	if p.Services["web"].Domain != "my-app.localhost" {
 		t.Fatalf("domain = %q", p.Services["web"].Domain)
+	}
+}
+
+func TestInitNonInteractiveRequiresYes(t *testing.T) {
+	dir := t.TempDir()
+	t.Chdir(dir)
+	var out, errb bytes.Buffer
+	if code := Init(nil, &out, &errb); code != ExitUsage {
+		t.Fatalf("Init exit = %d, want usage; stderr=%s", code, errb.String())
+	}
+}
+
+func TestRenderInteractiveCustomDomainSpec(t *testing.T) {
+	spec := initSpec{
+		ProjectName: "demo",
+		Services: []initService{
+			{Name: "web", Domain: "local.project.test"},
+			{Name: "api", Domain: "api.local.project.test", Port: 3001},
+		},
+	}
+	got := renderInitSpec(spec)
+	path := filepath.Join(t.TempDir(), config.Filename)
+	if err := os.WriteFile(path, []byte(got), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	p, err := config.Load(path)
+	if err != nil {
+		t.Fatalf("generated prx.toml invalid: %v\n%s", err, got)
+	}
+	if p.Services["web"].Domain != "local.project.test" {
+		t.Fatalf("web domain = %q", p.Services["web"].Domain)
+	}
+	if p.Services["api"].Domain != "api.local.project.test" || p.Services["api"].Port != 3001 {
+		t.Fatalf("api service = %+v", p.Services["api"])
 	}
 }
