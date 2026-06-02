@@ -1,0 +1,13 @@
+desc: Local-dev global HTTPS reverse proxy and port registry
+homepage: https://github.com/jinyongp/gate
+license: MIT
+dependencies:
+  build:
+    - go
+install: |
+  system "go", "build", *std_go_args(
+    ldflags: "-s -w -X main.version=v#{version}",
+    output:  bin/"gate",
+  ), "./cmd/gate"
+test: |
+  assert_match "v#{version}", shell_output("#{bin}/gate --version")
