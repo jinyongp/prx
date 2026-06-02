@@ -137,14 +137,10 @@ jobs:
       needs.release_tag.outputs.tag != '' &&
       needs.release_tag.outputs.on_main == 'true' &&
       needs.build.result == 'success'
-    uses: jinyongp/homebrew-tap/.github/workflows/publish-formula.yml@fdff7ed6b56230488d2a54174aa7b480a62238a3
+    uses: jinyongp/homebrew-tap/.github/workflows/publish-formula.yml@main
     with:
       formula: gate
-      source-repository: jinyongp/gate
-      tag: ${{ needs.release_tag.outputs.tag }}
-      description: Local-dev global HTTPS reverse proxy and port registry
-      license: MIT
-      main: ./cmd/gate
+      ref: ${{ needs.release_tag.outputs.tag }}
+      version: ${{ needs.release_tag.outputs.tag }}
     secrets:
-      token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
       deploy_key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
