@@ -5,8 +5,9 @@ single Go binary. It maps local domains to local dev servers, keeps domain and
 port reservations stable across projects, and can expose selected local routes
 to other devices for testing.
 
-`gate` is not a production proxy. It is designed for developer machines, local
-services, and temporary test exposure.
+> [!NOTE]
+> `gate` is not a production proxy. It is designed for developer machines, local
+> services, and temporary test exposure.
 
 ---
 

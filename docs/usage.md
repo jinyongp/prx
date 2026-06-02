@@ -13,9 +13,10 @@ project file.
 curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/install.sh | sh
 ```
 
-The installer writes `gate` to `~/.local/bin` by default. If that directory is
-not in `PATH`, the installer offers to update your shell startup file and prints
-the exact line you can add manually.
+> [!TIP]
+> The installer writes `gate` to `~/.local/bin` by default. If that directory is
+> not in `PATH`, the installer offers to update your shell startup file and
+> prints the exact line you can add manually.
 
 ## Trust HTTPS
 
@@ -26,9 +27,10 @@ certificate warnings, trust the CA once:
 gate trust
 ```
 
-This can require OS administrator approval. `.localhost` domains need no DNS
-setup. Custom domains can require `/etc/hosts` changes, so commands that reflect
-DNS may ask for permission.
+> [!NOTE]
+> This can require OS administrator approval. `.localhost` domains need no DNS
+> setup. Custom domains can require `/etc/hosts` changes, so commands that
+> reflect DNS may ask for permission.
 
 ## Project Mode
 
@@ -263,8 +265,10 @@ Export the root CA certificate:
 gate ca export --out gate-root.crt
 ```
 
-Install `gate-root.crt` on the other device as a trusted root certificate. Do
-not copy or share `root.key`; only export/share the `.crt` file.
+Install `gate-root.crt` on the other device as a trusted root certificate.
+
+> [!IMPORTANT]
+> Do not copy or share `root.key`; only export or share the `.crt` file.
 
 ### Same Machine
 
@@ -390,8 +394,8 @@ For a public URL, prefer auth:
 gate expose web --via cloudflared --auth user:pass
 ```
 
-Without `--auth`, gate warns because anyone with the public URL can reach your
-dev server.
+> [!IMPORTANT]
+> Without `--auth`, anyone with the public URL can reach your dev server.
 
 Limitations:
 
@@ -497,9 +501,10 @@ Non-interactive:
 curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstall.sh | sh -s -- -y
 ```
 
-The uninstall script removes user-level config, data, state, and known binary
-paths that exist on the machine. System trust store entries are intentionally
-left behind.
+> [!NOTE]
+> The uninstall script removes user-level config, data, state, and known binary
+> paths that exist on the machine. System trust store entries are intentionally
+> left behind.
 
 ## Exit Codes
 

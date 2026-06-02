@@ -2,8 +2,9 @@
 
 Local HTTPS reverse proxy and port registry for local development.
 
-> [!WARNING]
-> gate is a local development tool and is still under active development. It is intended for testing local services, not for production traffic or hosted environments.
+> [!NOTE]
+> gate is a local development tool for developer machines. It is intended for
+> testing local services, not for production traffic or hosted environments.
 
 ## Install
 
@@ -13,9 +14,10 @@ curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/install.
 
 Supported platforms: macOS and Linux (darwin, linux) on arm64 and amd64.
 
-The installer writes `gate` to `~/.local/bin` by default. If that directory is
-not in `PATH`, the installer offers to update your shell startup file and also
-prints the exact line you can add manually.
+> [!TIP]
+> The installer writes `gate` to `~/.local/bin` by default. If that directory is
+> not in `PATH`, the installer offers to update your shell startup file and also
+> prints the exact line you can add manually.
 
 For full usage, see [docs/usage.md](docs/usage.md). For detailed setup notes
 and internals, see [docs/spec.md](docs/spec.md).
@@ -41,7 +43,8 @@ curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstal
 curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstall.sh | sh -s -- -y
 ```
 
-The script removes only files and directories it discovers on the current machine. If privileged setup artifacts were never created, they are not removed.
+The script removes only files and directories it discovers on the current
+machine. If privileged setup artifacts were never created, they are not removed.
 
 By default it asks for confirmation before removing files.
 Use `-y` to skip it in automation.
@@ -52,56 +55,56 @@ Run this inside your app repository.
 
 1. Trust gate's local HTTPS certificate authority once:
 
-```bash
-gate trust
-```
+   ```bash
+   gate trust
+   ```
 
-This may ask for administrator approval.
+   This may ask for administrator approval.
 
 2. Create `gate.toml`:
 
-```bash
-gate init
-```
+   ```bash
+   gate init
+   ```
 
-For a non-interactive default:
+   For a non-interactive default:
 
-```bash
-gate init -y
-```
+   ```bash
+   gate init -y
+   ```
 
-Or edit the generated file to add more services:
+   Or edit the generated file to add more services:
 
-```toml
-[project]
-name = "my-project"
+   ```toml
+   [project]
+   name = "my-project"
 
-[services.web]
-domain = "app.example.localhost"
+   [services.web]
+   domain = "app.example.localhost"
 
-[services.api]
-domain = "api.example.localhost"
-port = 3001
-```
+   [services.api]
+   domain = "api.example.localhost"
+   port = 3001
+   ```
 
 3. Start gate and run your dev server through the reserved port:
 
-```bash
-gate up -d
-gate run web -- pnpm dev
-```
+   ```bash
+   gate up -d
+   gate run web -- pnpm dev
+   ```
 
-Replace `pnpm dev` with your app's dev-server command. `gate run` injects the
-reserved port as `PORT`.
+   Replace `pnpm dev` with your app's dev-server command. `gate run` injects the
+   reserved port as `PORT`.
 
 4. Open:
 
-```text
-https://web.my-project.localhost
-```
+   ```text
+   https://web.my-project.localhost
+   ```
 
-Use the route printed by `gate up`. If you edited the generated config to match
-the example above, open `https://app.example.localhost` instead.
+   Use the route printed by `gate up`. If you edited the generated config to
+   match the example above, open `https://app.example.localhost` instead.
 
 `.localhost` domains need no DNS setup. Custom domains need `/etc/hosts` or
 another local DNS setup, so `gate up` may ask for administrator approval.
