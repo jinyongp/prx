@@ -28,7 +28,7 @@ func read(t *testing.T, h Hosts) string {
 }
 
 func TestHostsEnsurePreservesExternal(t *testing.T) {
-	h := tempHosts(t, "127.0.0.1\tlocalhost\n255.255.255.255\tbroadcasthost\n")
+	h := tempHosts(t, "127.0.0.1\tlocalhost\n255.255.255.255\tbroadcasthost\n::1\tlocalhost\n")
 	if err := h.Ensure("app.example.com"); err != nil {
 		t.Fatal(err)
 	}
@@ -37,6 +37,32 @@ func TestHostsEnsurePreservesExternal(t *testing.T) {
 		if !strings.Contains(s, want) {
 			t.Fatalf("missing %q in:\n%s", want, s)
 		}
+	}
+	if strings.Contains(s, "# prx") {
+		t.Fatalf("managed entry should not include redundant comment:\n%s", s)
+	}
+	want := "255.255.255.255\tbroadcasthost\n::1\tlocalhost\n\n" +
+		beginMarker + "\n" +
+		"127.0.0.1\tapp.example.com\n" +
+		endMarker + "\n"
+	if !strings.Contains(s, want) {
+		t.Fatalf("managed block should be separated by one blank line:\n%s", s)
+	}
+}
+
+func TestHostsEnsureSeparatesExistingTrailingContent(t *testing.T) {
+	h := tempHosts(t, "127.0.0.1\tlocalhost\n\n"+beginMarker+"\n127.0.0.1\told.example.com\n"+endMarker+"\n# after\n")
+	if err := h.Ensure("app.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	want := "127.0.0.1\tlocalhost\n\n" +
+		beginMarker + "\n" +
+		"127.0.0.1\told.example.com\n" +
+		"127.0.0.1\tapp.example.com\n" +
+		endMarker + "\n\n" +
+		"# after\n"
+	if got := read(t, h); got != want {
+		t.Fatalf("hosts content =\n%q\nwant\n%q", got, want)
 	}
 }
 

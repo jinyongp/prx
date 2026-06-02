@@ -37,12 +37,18 @@ type projectReservation struct {
 }
 
 type portRow struct {
-	Project string `json:"project"`
-	Service string `json:"service"`
-	Domain  string `json:"domain"`
-	Port    int    `json:"port"`
-	Status  string `json:"status"`
-	Adhoc   bool   `json:"adhoc,omitempty"`
+	Project    string `json:"project"`
+	Service    string `json:"service"`
+	Domain     string `json:"domain"`
+	Port       int    `json:"port"`
+	Status     string `json:"status"`
+	Standalone bool   `json:"standalone,omitempty"`
+}
+
+type reservationLookupError struct {
+	Exit    int
+	Code    string
+	Message string
 }
 
 var (
@@ -180,26 +186,67 @@ func Port(args []string, stdout, stderr io.Writer) int {
 		return usageFail(stderr, *jsonOut, "port")
 	}
 	svc := rest[0]
-	p, err := currentProject()
-	if err != nil {
-		return fail(stderr, *jsonOut, ExitError, "no_project", err.Error())
-	}
-	if _, ok := p.Services[svc]; !ok {
-		return fail(stderr, *jsonOut, ExitError, "no_service", fmt.Sprintf("no service %q in project", svc))
-	}
-	reg, err := registryStore().Read()
-	if err != nil {
-		return fail(stderr, *jsonOut, ExitError, "registry_error", err.Error())
-	}
-	res, ok := reg.Get(registry.Key(p.Name, svc))
-	if !ok || res.Port == 0 {
-		return fail(stderr, *jsonOut, ExitError, "not_allocated", "no port allocated; run prx up")
+	res, lerr := lookupServiceReservation(svc)
+	if lerr != nil {
+		return fail(stderr, *jsonOut, lerr.Exit, lerr.Code, lerr.Message)
 	}
 	if *jsonOut {
-		return writeJSON(stdout, map[string]any{"service": svc, "port": res.Port})
+		out := map[string]any{"service": res.Service, "port": res.Port}
+		if res.Adhoc {
+			out["standalone"] = true
+		}
+		return writeJSON(stdout, out)
 	}
 	fmt.Fprintln(stdout, res.Port)
 	return ExitOK
+}
+
+func lookupServiceReservation(svc string) (registry.Reservation, *reservationLookupError) {
+	project, err := currentProject()
+	if err == nil {
+		if _, ok := project.Services[svc]; !ok {
+			return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "no_service", Message: fmt.Sprintf("no service %q in project", svc)}
+		}
+		reg, rerr := registryStore().Read()
+		if rerr != nil {
+			return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "registry_error", Message: rerr.Error()}
+		}
+		res, ok := reg.Get(registry.Key(project.Name, svc))
+		if !ok || res.Port == 0 {
+			return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "not_allocated", Message: "no port allocated; run prx up"}
+		}
+		return res, nil
+	}
+	if !errors.Is(err, config.ErrNotFound) {
+		return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "no_project", Message: err.Error()}
+	}
+
+	reg, rerr := registryStore().Read()
+	if rerr != nil {
+		return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "registry_error", Message: rerr.Error()}
+	}
+	res, ok := standaloneReservation(reg, svc)
+	if !ok || res.Port == 0 {
+		return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "not_allocated", Message: fmt.Sprintf("no standalone port for %q; run prx add <domain> <port>", svc)}
+	}
+	return res, nil
+}
+
+func standaloneReservation(reg *registry.Registry, svc string) (registry.Reservation, bool) {
+	domain := config.CanonicalDomain(svc)
+	if res, ok := reg.Get(registry.Key("", domain)); ok && res.Adhoc {
+		return res, true
+	}
+	for _, key := range reg.Keys() {
+		res := reg.Services[key]
+		if !res.Adhoc || res.Project != "" {
+			continue
+		}
+		if res.Service == svc || config.CanonicalDomain(res.Service) == domain || config.CanonicalDomain(res.Domain) == domain {
+			return res, true
+		}
+	}
+	return registry.Reservation{}, false
 }
 
 func listPorts(stdout, stderr io.Writer, jsonOut, all bool) int {
@@ -225,12 +272,12 @@ func listPorts(stdout, stderr io.Writer, jsonOut, all bool) int {
 			continue
 		}
 		rows = append(rows, portRow{
-			Project: res.Project,
-			Service: res.Service,
-			Domain:  res.Domain,
-			Port:    res.Port,
-			Status:  reservationStatus(res),
-			Adhoc:   res.Adhoc,
+			Project:    res.Project,
+			Service:    res.Service,
+			Domain:     res.Domain,
+			Port:       res.Port,
+			Status:     reservationStatus(res),
+			Standalone: res.Adhoc,
 		})
 	}
 	if jsonOut {
@@ -272,17 +319,18 @@ func displayPortOwner(r portRow) string {
 		}
 		return r.Project
 	}
-	if r.Adhoc {
+	if r.Standalone {
 		if r.Service != "" {
-			return "adhoc/" + r.Service
+			return "standalone/" + r.Service
 		}
-		return "adhoc"
+		return "standalone"
 	}
 	return "-"
 }
 
 // Add reserves a domain→port mapping. Inside a prx project, it also appends a
-// service block to prx.toml; outside a project it creates an adhoc registry entry.
+// service block to prx.toml; outside a project it creates a standalone registry
+// entry.
 func Add(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
@@ -311,9 +359,16 @@ func Add(args []string, stdout, stderr io.Writer) int {
 			TLS: config.TLSInternal, ConfigPath: path,
 		}
 	}
+	if !inProject {
+		res.Active = true
+		res.DNS = dns.ModeFor(domain, "")
+	}
 
 	if err := registryStore().ReadReserve(res); err != nil {
 		return addError(stderr, *jsonOut, err)
+	}
+	if !inProject {
+		return addStandalone(res, stdout, stderr, *jsonOut)
 	}
 	if inProject {
 		if err := config.AddService(path, serviceName, config.Service{Domain: domain, Port: p, TLS: config.TLSInternal}); err != nil {
@@ -338,6 +393,44 @@ func Add(args []string, stdout, stderr io.Writer) int {
 		return writeJSON(stdout, map[string]any{"service": res.Service, "domain": domain, "port": p, "reserved": true})
 	}
 	fmt.Fprintf(stdout, "reserved  %s -> :%d\n", domain, p)
+	return ExitOK
+}
+
+func addStandalone(res registry.Reservation, stdout, stderr io.Writer, jsonOut bool) int {
+	if err := selectDNSProvider(res.Domain, res.DNS).Ensure(res.Domain); err != nil {
+		if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
+			return fail(stderr, jsonOut, ExitPerm, "permission", err.Error())
+		}
+		return fail(stderr, jsonOut, ExitError, "dns_failed", err.Error())
+	}
+
+	reg, err := registryStore().Read()
+	if err != nil {
+		_ = selectDNSProvider(res.Domain, res.DNS).Remove(res.Domain)
+		return fail(stderr, jsonOut, ExitError, "registry_error", err.Error())
+	}
+	beforeRoutes := activeRoutes(reg)
+	var routes []proxy.Route
+	err = registryStore().Update(func(r *registry.Registry) error {
+		if err := r.Reserve(res); err != nil {
+			return err
+		}
+		routes = activeRoutes(r)
+		return nil
+	})
+	if err != nil {
+		_ = selectDNSProvider(res.Domain, res.DNS).Remove(res.Domain)
+		return addError(stderr, jsonOut, err)
+	}
+	if code := reloadDaemonRoutes(routes, stderr, jsonOut); code != ExitOK {
+		_ = removeReservation(res, beforeRoutes)
+		_ = selectDNSProvider(res.Domain, res.DNS).Remove(res.Domain)
+		return code
+	}
+	if jsonOut {
+		return writeJSON(stdout, map[string]any{"service": res.Service, "domain": res.Domain, "port": res.Port, "reserved": true, "standalone": true})
+	}
+	fmt.Fprintf(stdout, "reserved  %s -> :%d\n", res.Domain, res.Port)
 	return ExitOK
 }
 
@@ -382,8 +475,17 @@ func Rm(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	var removed bool
-	err := registryStore().Update(func(r *registry.Registry) error {
-		_, removed = r.ReleaseDomain(domain)
+	var removedRes registry.Reservation
+	var beforeRoutes []proxy.Route
+	var routes []proxy.Route
+	reg, err := registryStore().Read()
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitError, "registry_error", err.Error())
+	}
+	beforeRoutes = activeRoutes(reg)
+	err = registryStore().Update(func(r *registry.Registry) error {
+		removedRes, removed = r.ReleaseDomain(domain)
+		routes = activeRoutes(r)
 		return nil
 	})
 	if err != nil {
@@ -391,6 +493,20 @@ func Rm(args []string, stdout, stderr io.Writer) int {
 	}
 	if !removed {
 		return fail(stderr, *jsonOut, ExitError, "not_found", fmt.Sprintf("no reservation for %q", domain))
+	}
+	if code := reloadDaemonRoutes(routes, stderr, *jsonOut); code != ExitOK {
+		_ = restoreReservations([]projectReservation{{Key: registry.Key(removedRes.Project, removedRes.Service), Reservation: removedRes}}, beforeRoutes)
+		return code
+	}
+	if err := selectDNSProvider(removedRes.Domain, removedRes.DNS).Remove(removedRes.Domain); err != nil {
+		rollbackErr := restoreReservations([]projectReservation{{Key: registry.Key(removedRes.Project, removedRes.Service), Reservation: removedRes}}, beforeRoutes)
+		if rollbackErr != nil {
+			return fail(stderr, *jsonOut, ExitError, "rollback_failed", "removal failed and rollback failed: "+rollbackErr.Error())
+		}
+		if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
+			return fail(stderr, *jsonOut, ExitPerm, "permission", err.Error())
+		}
+		return fail(stderr, *jsonOut, ExitError, "dns_failed", err.Error())
 	}
 	if *jsonOut {
 		return writeJSON(stdout, map[string]any{"domain": domain, "removed": true})
@@ -490,6 +606,10 @@ func restoreProjectDNS(removed []projectReservation) error {
 }
 
 func restoreProjectReservations(removed []projectReservation, routes []proxy.Route) error {
+	return restoreReservations(removed, routes)
+}
+
+func restoreReservations(removed []projectReservation, routes []proxy.Route) error {
 	var errs []error
 	if err := registryStore().Update(func(r *registry.Registry) error {
 		for _, item := range removed {
@@ -500,6 +620,20 @@ func restoreProjectReservations(removed []projectReservation, routes []proxy.Rou
 		return nil
 	}); err != nil {
 		errs = append(errs, fmt.Errorf("restore registry: %w", err))
+	}
+	if err := setDaemonRoutesFunc(routes); err != nil {
+		errs = append(errs, fmt.Errorf("restore daemon routes: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+func removeReservation(res registry.Reservation, routes []proxy.Route) error {
+	var errs []error
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		r.Release(registry.Key(res.Project, res.Service))
+		return nil
+	}); err != nil {
+		errs = append(errs, fmt.Errorf("remove registry: %w", err))
 	}
 	if err := setDaemonRoutesFunc(routes); err != nil {
 		errs = append(errs, fmt.Errorf("restore daemon routes: %w", err))
@@ -595,17 +729,9 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	svc := args[0]
 	cmd := args[sep+1:]
 
-	p, err := currentProject()
-	if err != nil {
-		return fail(stderr, false, ExitError, "no_project", err.Error())
-	}
-	reg, err := registryStore().Read()
-	if err != nil {
-		return fail(stderr, false, ExitError, "registry_error", err.Error())
-	}
-	res, ok := reg.Get(registry.Key(p.Name, svc))
-	if !ok || res.Port == 0 {
-		return fail(stderr, false, ExitError, "not_allocated", fmt.Sprintf("no port for %q; run prx up", svc))
+	res, lerr := lookupServiceReservation(svc)
+	if lerr != nil {
+		return fail(stderr, false, lerr.Exit, lerr.Code, lerr.Message)
 	}
 	return port.Exec(res.Port, cmd[0], cmd[1:], os.Stdin, stdout, stderr)
 }

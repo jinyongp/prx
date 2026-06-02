@@ -484,7 +484,7 @@ type Provider interface {
 1. **모드 A `localhost`:** `*.localhost`는 OS/브라우저가 127.0.0.1 해석 → **no-op** provider. 권한 0.
 2. **모드 B `hosts`:**
    - 관리 블록 마커: `# >>> prx managed >>>` … `# <<< prx managed <<<` 사이만 편집.
-   - 항목: `127.0.0.1  <domain>      # prx:<proj>:<svc>`.
+   - 항목: `127.0.0.1  <domain>`.
    - **권한(sudo):** 편집 전 `/etc/hosts` 소유·심볼릭 링크 검증(README §12). temp+rename 원자적 교체. 권한 부족 시 exit 3.
 3. **모드 판별:** 도메인이 `.localhost`로 끝나면 A, 아니면 B. `--dns localhost|hosts` override.
 

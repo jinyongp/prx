@@ -117,8 +117,116 @@ func TestTrailingJSONFlag(t *testing.T) {
 		t.Fatalf("add json: %v\n%s", err, out.String())
 	}
 	out.Reset()
-	if code := Port([]string{"a.localhost", "--json"}, &out, &errb); code != ExitError {
-		t.Fatalf("Port outside project exit = %d, want no_project error", code)
+	if code := Port([]string{"a.localhost", "--json"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Port outside project exit = %d, stderr=%s", code, errb.String())
+	}
+	var gotPort struct {
+		Service    string `json:"service"`
+		Port       int    `json:"port"`
+		Standalone bool   `json:"standalone"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &gotPort); err != nil {
+		t.Fatalf("port json: %v\n%s", err, out.String())
+	}
+	if gotPort.Service != "a.localhost" || gotPort.Port != 4312 || !gotPort.Standalone {
+		t.Fatalf("port json = %+v", gotPort)
+	}
+}
+
+func TestAddStandaloneActivatesDNSAndRoutes(t *testing.T) {
+	isolate(t)
+	oldSelect := selectDNSProvider
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() {
+		selectDNSProvider = oldSelect
+		setDaemonRoutesFunc = oldSetRoutes
+	})
+	var ensured []string
+	selectDNSProvider = func(_, _ string) dns.Provider {
+		return fakeDNSProvider{
+			ensure: func(domain string) error {
+				ensured = append(ensured, domain)
+				return nil
+			},
+		}
+	}
+	var routes []proxy.Route
+	setDaemonRoutesFunc = func(next []proxy.Route) error {
+		routes = append([]proxy.Route{}, next...)
+		return nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Add([]string{"web.localhost", "4312"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Add exit = %d, stderr=%s", code, errb.String())
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, ok := reg.Get(registry.Key("", "web.localhost"))
+	if !ok || !res.Adhoc || !res.Active || res.Port != 4312 {
+		t.Fatalf("standalone reservation = %+v, ok=%v", res, ok)
+	}
+	if len(ensured) != 1 || ensured[0] != "web.localhost" {
+		t.Fatalf("ensured = %v", ensured)
+	}
+	if len(routes) != 1 || routes[0].Domain != "web.localhost" || routes[0].Upstream != "127.0.0.1:4312" {
+		t.Fatalf("routes = %+v", routes)
+	}
+}
+
+func TestRmStandaloneRemovesDNSAndRoutes(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{
+			Service: "web.localhost",
+			Domain:  "web.localhost",
+			Port:    4312,
+			DNS:     "localhost",
+			Adhoc:   true,
+			Active:  true,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldSelect := selectDNSProvider
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() {
+		selectDNSProvider = oldSelect
+		setDaemonRoutesFunc = oldSetRoutes
+	})
+	var removed []string
+	selectDNSProvider = func(_, _ string) dns.Provider {
+		return fakeDNSProvider{
+			remove: func(domain string) error {
+				removed = append(removed, domain)
+				return nil
+			},
+		}
+	}
+	var routes []proxy.Route
+	setDaemonRoutesFunc = func(next []proxy.Route) error {
+		routes = append([]proxy.Route{}, next...)
+		return nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Rm([]string{"web.localhost"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Rm exit = %d, stderr=%s", code, errb.String())
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.Get(registry.Key("", "web.localhost")); ok {
+		t.Fatal("standalone reservation not removed")
+	}
+	if len(removed) != 1 || removed[0] != "web.localhost" {
+		t.Fatalf("removed DNS = %v", removed)
+	}
+	if len(routes) != 0 {
+		t.Fatalf("routes = %+v, want empty", routes)
 	}
 }
 
@@ -571,6 +679,42 @@ func TestPortListsAllReservedPorts(t *testing.T) {
 	}
 }
 
+func TestPortListsStandaloneReservations(t *testing.T) {
+	isolate(t)
+	var out, errb bytes.Buffer
+	if code := Add([]string{"web.localhost", "4312"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Add exit = %d, stderr=%s", code, errb.String())
+	}
+
+	out.Reset()
+	if code := Port([]string{"-a"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Port -a exit = %d, stderr=%s", code, errb.String())
+	}
+	s := out.String()
+	if !strings.Contains(s, "standalone/web.localhost") {
+		t.Fatalf("standalone owner missing in:\n%s", s)
+	}
+	if strings.Contains(s, "adhoc") {
+		t.Fatalf("port list should not expose adhoc terminology:\n%s", s)
+	}
+
+	out.Reset()
+	if code := Port([]string{"-a", "--json"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Port -a --json exit = %d, stderr=%s", code, errb.String())
+	}
+	var got struct {
+		Ports []struct {
+			Standalone bool `json:"standalone"`
+		} `json:"ports"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("json: %v\n%s", err, out.String())
+	}
+	if len(got.Ports) != 1 || !got.Ports[0].Standalone {
+		t.Fatalf("unexpected standalone json: %+v", got.Ports)
+	}
+}
+
 func TestPortListsReservedPortsJSON(t *testing.T) {
 	setupProject(t)
 	var out, errb bytes.Buffer
@@ -612,6 +756,30 @@ func TestRunInjectsPort(t *testing.T) {
 		t.Fatalf("Run exit = %d, stderr=%s", code, errb.String())
 	}
 	if out.String() != "4400" {
+		t.Fatalf("PORT = %q", out.String())
+	}
+}
+
+func TestRunUsesStandaloneReservationOutsideProject(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{
+			Service: "web.localhost",
+			Domain:  "web.localhost",
+			Port:    4312,
+			Adhoc:   true,
+			Active:  true,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	code := Run([]string{"web.localhost", "--", "sh", "-c", `printf %s "$PORT"`}, &out, &errb)
+	if code != ExitOK {
+		t.Fatalf("Run exit = %d, stderr=%s", code, errb.String())
+	}
+	if out.String() != "4312" {
 		t.Fatalf("PORT = %q", out.String())
 	}
 }

@@ -126,5 +126,9 @@ Process env overrides dotenv values; earlier env files override later env files.
 uses `default` when unset or empty.
 
 Inside a project, `prx add`/`prx rm` edit this file in place, preserving comments.
-Outside a project they create/remove adhoc registry reservations. Domains ending
+Outside a project they create/remove standalone registry reservations. Domains ending
 in `.localhost` need no sudo; custom domains use `/etc/hosts` (sudo).
+Standalone reservations are active routes: if the daemon is running, `add`/`rm`
+hot-reload it; if it is stopped, `prx daemon start` loads active routes from the
+registry. Outside a project, `prx port <domain>` and `prx run <domain> -- ...`
+resolve standalone reservations by domain.

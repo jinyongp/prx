@@ -39,7 +39,7 @@ func (h Hosts) Ensure(domain string) error {
 		if containsDomain(entries, domain) {
 			return entries
 		}
-		return append(entries, fmt.Sprintf("127.0.0.1\t%s\t# prx", domain))
+		return append(entries, fmt.Sprintf("127.0.0.1\t%s", domain))
 	})
 }
 
@@ -83,9 +83,14 @@ func (h Hosts) edit(mutate func(entries []string) []string) error {
 	var out []string
 	out = append(out, before...)
 	if len(entries) > 0 {
+		out = appendBlankLine(out)
 		out = append(out, beginMarker)
 		out = append(out, entries...)
 		out = append(out, endMarker)
+		after = trimLeadingBlankLines(after)
+		if len(after) > 0 {
+			out = append(out, "")
+		}
 	}
 	out = append(out, after...)
 
@@ -94,6 +99,20 @@ func (h Hosts) edit(mutate func(entries []string) []string) error {
 		content += "\n"
 	}
 	return h.write([]byte(content))
+}
+
+func appendBlankLine(lines []string) []string {
+	if len(lines) == 0 || strings.TrimSpace(lines[len(lines)-1]) == "" {
+		return lines
+	}
+	return append(lines, "")
+}
+
+func trimLeadingBlankLines(lines []string) []string {
+	for len(lines) > 0 && strings.TrimSpace(lines[0]) == "" {
+		lines = lines[1:]
+	}
+	return lines
 }
 
 func (h Hosts) lock() (func(), error) {
