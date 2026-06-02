@@ -32,58 +32,11 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-  check:
+  build:
     needs: [release_tag]
     if: |
       needs.release_tag.outputs.tag != '' &&
       needs.release_tag.outputs.on_main == 'true'
-    strategy:
-      matrix:
-        os: [ubuntu-latest, macos-latest]
-    runs-on: ${{ matrix.os }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
-        with:
-          go-version: "1.26"
-      - name: gofmt
-        id: gofmt
-        run: scripts/dev/fmt-check.sh
-      - name: vet
-        id: vet
-        run: scripts/dev/vet.sh
-      - name: golangci-lint
-        id: golangci_lint
-        uses: golangci/golangci-lint-action@82606bf257cbaff209d206a39f5134f0cfbfd2ee # v9.2.1
-        with:
-          version: v2.12.2
-      - name: govulncheck
-        id: govulncheck
-        run: scripts/dev/vuln.sh
-      - name: scripts
-        id: scripts
-        run: scripts/dev/check-scripts.sh
-      - name: test
-        id: test
-        run: scripts/dev/cover.sh
-      - name: job summary
-        if: always()
-        run: bash .github/scripts/check-summary.sh
-        env:
-          RUNNER_OS_NAME: ${{ matrix.os }}
-          GOFMT_OUTCOME: ${{ steps.gofmt.outcome }}
-          VET_OUTCOME: ${{ steps.vet.outcome }}
-          GOLANGCI_LINT_OUTCOME: ${{ steps.golangci_lint.outcome }}
-          GOVULNCHECK_OUTCOME: ${{ steps.govulncheck.outcome }}
-          SCRIPTS_OUTCOME: ${{ steps.scripts.outcome }}
-          TEST_OUTCOME: ${{ steps.test.outcome }}
-
-  build:
-    needs: [release_tag, check]
-    if: |
-      needs.release_tag.outputs.tag != '' &&
-      needs.release_tag.outputs.on_main == 'true' &&
-      needs.check.result == 'success'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -130,3 +83,21 @@ jobs:
           UPLOAD_ARTIFACT_OUTCOME: ${{ steps.upload_artifact.outcome }}
           CHECKSUMS_OUTCOME: ${{ steps.checksums.outcome }}
           PUBLISH_RELEASE_OUTCOME: ${{ steps.publish_release.outcome }}
+
+  homebrew_tap:
+    needs: [release_tag, build]
+    if: |
+      needs.release_tag.outputs.tag != '' &&
+      needs.release_tag.outputs.on_main == 'true' &&
+      needs.build.result == 'success'
+    uses: jinyongp/homebrew-tap/.github/workflows/publish-formula.yml@fdff7ed6b56230488d2a54174aa7b480a62238a3
+    with:
+      formula: gate
+      source-repository: jinyongp/gate
+      tag: ${{ needs.release_tag.outputs.tag }}
+      description: Local-dev global HTTPS reverse proxy and port registry
+      license: MIT
+      main: ./cmd/gate
+    secrets:
+      token: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+      deploy_key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
