@@ -51,6 +51,14 @@ This updates gate to the latest GitHub release.
 
 Removes user-level config/data/state and binaries.
 
+Using Homebrew:
+
+```bash
+brew uninstall gate
+```
+
+Or using the uninstall script:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstall.sh | sh
 ```
@@ -60,11 +68,15 @@ curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstal
 curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstall.sh | sh -s -- -y
 ```
 
-The script removes only files and directories it discovers on the current
+The script first attempts to remove gate's trusted root CA from OS/browser trust
+stores, then removes only files and directories it discovers on the current
 machine. If privileged setup artifacts were never created, they are not removed.
+Homebrew-managed symlinks are skipped; use `brew uninstall gate` for Homebrew
+installs.
 
 By default it asks for confirmation before removing files.
 Use `-y` to skip it in automation.
+Use `--keep-trust` to leave trust store entries in place.
 
 ## Quick Start
 

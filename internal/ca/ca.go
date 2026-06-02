@@ -28,6 +28,9 @@ const (
 	rootCN       = "gate local CA"
 )
 
+// ErrNotFound means no persisted gate root CA exists at the requested location.
+var ErrNotFound = errors.New("ca: root CA not found")
+
 // CA is the loaded root authority and its in-memory leaf cache.
 type CA struct {
 	dir  string // the "ca" directory holding root.crt / root.key
@@ -43,19 +46,61 @@ type CA struct {
 // use.
 func Load(baseDir string) (*CA, error) {
 	dir := filepath.Join(baseDir, "ca")
+	ca, err := loadExistingDir(dir)
+	if err == nil {
+		return ca, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return nil, err
+	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, err
 	}
-	ca := &CA{dir: dir, cache: map[string]*tls.Certificate{}}
-
-	crtPath, keyPath := ca.paths()
-	if fileExists(crtPath) && fileExists(keyPath) {
-		if err := ca.load(crtPath, keyPath); err != nil {
-			return nil, err
-		}
-		return ca, nil
-	}
+	ca = &CA{dir: dir, cache: map[string]*tls.Certificate{}}
 	if err := ca.generate(); err != nil {
+		return nil, err
+	}
+	return ca, nil
+}
+
+// LoadExisting loads the root CA from baseDir/ca without generating a new one.
+func LoadExisting(baseDir string) (*CA, error) {
+	return loadExistingDir(filepath.Join(baseDir, "ca"))
+}
+
+// LoadCertificate loads only the persisted root certificate without requiring
+// the private key. This is for trust-store cleanup paths that must keep working
+// even when key material has already been removed.
+func LoadCertificate(baseDir string) (*CA, error) {
+	dir := filepath.Join(baseDir, "ca")
+	ca := &CA{dir: dir, cache: map[string]*tls.Certificate{}}
+	crtPath, _ := ca.paths()
+	if !fileExists(crtPath) {
+		return nil, ErrNotFound
+	}
+	crtPEM, err := os.ReadFile(crtPath)
+	if err != nil {
+		return nil, err
+	}
+	blk, _ := pem.Decode(crtPEM)
+	if blk == nil {
+		return nil, fmt.Errorf("ca: bad root cert PEM in %s", crtPath)
+	}
+	cert, err := x509.ParseCertificate(blk.Bytes)
+	if err != nil {
+		return nil, err
+	}
+	ca.cert, ca.der = cert, cert.Raw
+	return ca, nil
+}
+
+func loadExistingDir(dir string) (*CA, error) {
+	ca := &CA{dir: dir, cache: map[string]*tls.Certificate{}}
+	crtPath, keyPath := ca.paths()
+	if !fileExists(crtPath) || !fileExists(keyPath) {
+		return nil, ErrNotFound
+	}
+	if err := ca.load(crtPath, keyPath); err != nil {
 		return nil, err
 	}
 	return ca, nil

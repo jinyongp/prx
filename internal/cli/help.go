@@ -33,6 +33,7 @@ var Specs = []CmdSpec{
 	{"run", "<service> -- <cmd> [args]", "run a child process with PORT injected from the reservation"},
 	{"daemon", "start|stop|restart|status|logs", "control scoped background proxy daemons"},
 	{"trust", "", "install the local CA into the OS and browser trust stores"},
+	{"untrust", "", "remove the local CA from OS and browser trust stores"},
 	{"ca", "export [--out <path>]", "export the local CA certificate"},
 	{"expose", "<service> --via <provider>", "publish a local service through a public tunnel provider"},
 	{"completion", "<bash|zsh|fish>", "print shell completion script (bash|zsh|fish)"},

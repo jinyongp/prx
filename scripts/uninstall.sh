@@ -4,9 +4,11 @@ set -eu
 FOUND=0
 FAILED=0
 FORCE=0
+KEEP_TRUST=0
 WORKFILE="$(mktemp)"
 SORTED_FILE="${WORKFILE}.sorted"
-trap 'rm -f "$WORKFILE" "$SORTED_FILE"' EXIT
+CLEANUP_FILE="${WORKFILE}.cleanup"
+trap 'rm -f "$WORKFILE" "$SORTED_FILE" "$CLEANUP_FILE"' EXIT
 
 SCRIPT_DIR="$(CDPATH="" cd "$(dirname "$0")" 2>/dev/null && pwd || pwd)"
 if [ -r "${SCRIPT_DIR}/lib/ui.sh" ]; then
@@ -23,8 +25,11 @@ for arg in "$@"; do
     -y|--yes|--force)
       FORCE=1
       ;;
+    --keep-trust)
+      KEEP_TRUST=1
+      ;;
     -h|--help)
-      echo "Usage: sh uninstall.sh [--yes|--force|-y]" >&2
+      echo "Usage: sh uninstall.sh [--yes|--force|-y] [--keep-trust]" >&2
       exit 0
       ;;
     *)
@@ -86,17 +91,64 @@ collect_paths() {
   if [ -f "${HOME_DIR}/.local/bin/gate" ] || [ -L "${HOME_DIR}/.local/bin/gate" ]; then
     printf '%s\n' "${HOME_DIR}/.local/bin/gate" >> "$WORKFILE"
   fi
-  if [ -f "/usr/local/bin/gate" ] || [ -L "/usr/local/bin/gate" ]; then
+  if { [ -f "/usr/local/bin/gate" ] || [ -L "/usr/local/bin/gate" ]; } && ! is_homebrew_gate "/usr/local/bin/gate"; then
     printf '%s\n' "/usr/local/bin/gate" >> "$WORKFILE"
   fi
 }
 
+is_homebrew_gate() {
+  path="$1"
+  if [ ! -L "$path" ]; then
+    return 1
+  fi
+  target="$(readlink "$path" 2>/dev/null || true)"
+  case "$target" in
+    */Cellar/gate/*)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+append_cleanup_action() {
+  printf '%s\n' "$1" >> "$CLEANUP_FILE"
+}
+
+collect_cleanup_actions() {
+  dat_dir="$(gate_data_dir)"
+  if [ "$KEEP_TRUST" -ne 1 ] && [ -f "${dat_dir}/ca/root.crt" ]; then
+    append_cleanup_action "trust store entry for gate root CA"
+  fi
+  if [ -f "/etc/hosts" ] && grep -F "# >>> gate managed >>>" "/etc/hosts" >/dev/null 2>&1; then
+    append_cleanup_action "managed hosts block in /etc/hosts"
+  fi
+  for rc_file in \
+    "${HOME_DIR}/.zshrc" \
+    "${HOME_DIR}/.bashrc" \
+    "${HOME_DIR}/.bash_profile" \
+    "${HOME_DIR}/.bash_login" \
+    "${HOME_DIR}/.profile" \
+    "${HOME_DIR}/.config/fish/config.fish"
+  do
+    if grep -F "# >>> gate PATH >>>" "$rc_file" >/dev/null 2>&1; then
+      append_cleanup_action "gate PATH block in $rc_file"
+    fi
+  done
+}
+
 collect_paths
+collect_cleanup_actions
 sort -u "$WORKFILE" > "$SORTED_FILE"
-if [ -s "$SORTED_FILE" ]; then
+if [ -s "$SORTED_FILE" ] || [ -s "$CLEANUP_FILE" ]; then
   ui_section "Discovered artifacts"
-  printf '  Only existing discovered paths will be removed:\n'
-  sed 's/^/  - /' "$SORTED_FILE"
+  if [ -s "$SORTED_FILE" ]; then
+    printf '  Existing paths to remove:\n'
+    sed 's/^/  - /' "$SORTED_FILE"
+  fi
+  if [ -s "$CLEANUP_FILE" ]; then
+    printf '  Cleanup actions:\n'
+    sed 's/^/  - /' "$CLEANUP_FILE"
+  fi
   if [ "$FORCE" -ne 1 ]; then
     ui_prompt "Type y to proceed, anything else to cancel [y/N]:"
     if ! read -r response; then
@@ -146,6 +198,167 @@ stop_daemons_in_dir() {
   fi
 }
 
+find_gate_binary() {
+  if [ -n "${GATE_BIN:-}" ] && [ -x "${GATE_BIN}" ]; then
+    printf '%s\n' "${GATE_BIN}"
+    return
+  fi
+  if [ -n "${GATE_BIN_DIR:-}" ] && [ -x "${GATE_BIN_DIR}/gate" ]; then
+    printf '%s\n' "${GATE_BIN_DIR}/gate"
+    return
+  fi
+  for candidate in "${HOME_DIR}/.local/bin/gate" "/usr/local/bin/gate"; do
+    if [ -x "$candidate" ]; then
+      printf '%s\n' "$candidate"
+      return
+    fi
+  done
+  cmd="$(command -v gate 2>/dev/null || true)"
+  if [ -n "$cmd" ] && [ -x "$cmd" ]; then
+    printf '%s\n' "$cmd"
+    return
+  fi
+}
+
+untrust_gate() {
+  if [ "$KEEP_TRUST" -eq 1 ]; then
+    return
+  fi
+  dat_dir="$(gate_data_dir)"
+  if [ ! -f "${dat_dir}/ca/root.crt" ]; then
+    return
+  fi
+  gate_bin="$(find_gate_binary || true)"
+  if [ -z "${gate_bin:-}" ]; then
+    ui_error "skipping trust cleanup: gate binary not found"
+    FAILED=1
+    return
+  fi
+  ui_section "Trust store cleanup"
+  if "$gate_bin" untrust; then
+    ui_ok "removed trusted gate root CA"
+    FOUND=1
+    return
+  fi
+  ui_error "failed to remove trusted gate root CA"
+  FAILED=1
+}
+
+untrust_gate
+
+remove_marked_block() {
+  path="$1"
+  begin="$2"
+  end="$3"
+  if [ ! -f "$path" ]; then
+    return 0
+  fi
+  if ! grep -F "$begin" "$path" >/dev/null 2>&1; then
+    return 0
+  fi
+  tmp="$(mktemp)"
+  awk -v begin="$begin" -v end="$end" '
+    $0 == begin { skip = 1; changed = 1; next }
+    $0 == end && skip == 1 { skip = 0; ended = 1; next }
+    skip != 1 { print }
+    END {
+      if (changed != 1) exit 3
+      if (ended != 1) exit 2
+    }
+  ' "$path" > "$tmp" || {
+    status=$?
+    rm -f "$tmp"
+    return "$status"
+  }
+  if cmp -s "$path" "$tmp"; then
+    rm -f "$tmp"
+    return 0
+  fi
+  if cat "$tmp" > "$path"; then
+    rm -f "$tmp"
+    return 0
+  fi
+  rm -f "$tmp"
+  return 1
+}
+
+cleanup_path_blocks() {
+  for rc_file in \
+    "${HOME_DIR}/.zshrc" \
+    "${HOME_DIR}/.bashrc" \
+    "${HOME_DIR}/.bash_profile" \
+    "${HOME_DIR}/.bash_login" \
+    "${HOME_DIR}/.profile" \
+    "${HOME_DIR}/.config/fish/config.fish"
+  do
+    if grep -F "# >>> gate PATH >>>" "$rc_file" >/dev/null 2>&1; then
+      if remove_marked_block "$rc_file" "# >>> gate PATH >>>" "# <<< gate PATH <<<"; then
+        ui_ok "removed gate PATH block from $rc_file"
+        FOUND=1
+      else
+        ui_error "failed to remove gate PATH block from: $rc_file"
+        FAILED=1
+      fi
+    fi
+  done
+}
+
+cleanup_hosts_block() {
+  hosts_file="/etc/hosts"
+  if [ ! -f "$hosts_file" ]; then
+    return
+  fi
+  if [ -L "$hosts_file" ]; then
+    ui_error "skipping hosts cleanup: /etc/hosts is a symlink"
+    FAILED=1
+    return
+  fi
+  if ! grep -F "# >>> gate managed >>>" "$hosts_file" >/dev/null 2>&1; then
+    return
+  fi
+  tmp="$(mktemp)"
+  awk '
+    $0 == "# >>> gate managed >>>" { skip = 1; changed = 1; next }
+    $0 == "# <<< gate managed <<<" && skip == 1 { skip = 0; ended = 1; next }
+    skip != 1 { print }
+    END {
+      if (changed != 1) exit 3
+      if (ended != 1) exit 2
+    }
+  ' "$hosts_file" > "$tmp" || {
+    status=$?
+    rm -f "$tmp"
+    ui_error "failed to prepare hosts cleanup"
+    FAILED=1
+    return
+  }
+  if cmp -s "$hosts_file" "$tmp"; then
+    rm -f "$tmp"
+    return
+  fi
+  dst="${hosts_file}.gate.tmp.$$"
+  if run_privileged install -m 0644 "$tmp" "$dst" && run_privileged mv "$dst" "$hosts_file"; then
+    ui_ok "removed gate block from /etc/hosts"
+    FOUND=1
+  else
+    ui_error "failed to remove gate block from /etc/hosts"
+    FAILED=1
+    run_privileged rm -f "$dst" 2>/dev/null || true
+  fi
+  rm -f "$tmp"
+}
+
+run_privileged() {
+  if command -v sudo >/dev/null 2>&1; then
+    sudo "$@"
+    return
+  fi
+  "$@"
+}
+
+cleanup_path_blocks
+cleanup_hosts_block
+
 while IFS= read -r target; do
   if [ ! -e "$target" ] && [ ! -L "$target" ]; then
     continue
@@ -173,12 +386,6 @@ while IFS= read -r target; do
   fi
 done < "$SORTED_FILE"
 
-if [ "$FOUND" -eq 0 ]; then
-  ui_section "Uninstall complete"
-  echo "No gate installation artifacts found."
-  exit 0
-fi
-
 if command -v rehash >/dev/null 2>&1; then
   rehash
 fi
@@ -189,6 +396,12 @@ fi
 if [ "$FAILED" -eq 1 ]; then
   ui_error "gate uninstall completed with errors."
   exit 1
+fi
+
+if [ "$FOUND" -eq 0 ]; then
+  ui_section "Uninstall complete"
+  echo "No gate installation artifacts found."
+  exit 0
 fi
 
 ui_section "Uninstall complete"

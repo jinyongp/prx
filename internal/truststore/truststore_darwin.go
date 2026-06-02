@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strings"
 
 	plist "howett.net/plist"
 )
@@ -126,9 +127,20 @@ func uninstallPlatform(filename string, _ *x509.Certificate) error {
 	cmd := exec.Command("sudo", "security", "remove-trusted-cert", "-d", filename)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
+		if isRemoveTrustedCertNotFound(out) {
+			debug("certificate was not present in macOS keychain")
+			return nil
+		}
 		return NewCmdError(err, cmd, out)
 	}
 
 	debug("certificate uninstalled properly from macOS keychain")
 	return nil
+}
+
+func isRemoveTrustedCertNotFound(out []byte) bool {
+	s := strings.ToLower(string(out))
+	return strings.Contains(s, "could not be found") ||
+		strings.Contains(s, "unable to find") ||
+		strings.Contains(s, "not found")
 }

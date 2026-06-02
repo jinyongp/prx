@@ -47,6 +47,7 @@ var commands = map[string]command{
 	"run":     cli.Run,
 	"daemon":  cli.Daemon,
 	"trust":   cli.Trust,
+	"untrust": cli.Untrust,
 	"ca":      cli.Ca,
 	"expose":  cli.Expose,
 	"upgrade": cli.Upgrade,
@@ -197,7 +198,7 @@ var commandGroups = []struct {
 	{"PROJECT", []string{"init", "up", "down", "ls", "run", "port"}},
 	{"REGISTRY", []string{"add", "rm", "prune"}},
 	{"DAEMON", []string{"daemon"}},
-	{"TLS", []string{"trust", "ca"}},
+	{"TLS", []string{"trust", "untrust", "ca"}},
 	{"SHARE", []string{"expose"}},
 	{"MAINTENANCE", []string{"upgrade", "skill", "completion"}},
 }

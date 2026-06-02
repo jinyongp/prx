@@ -323,7 +323,8 @@ flowchart TB
 
 The default provider creates a local root CA and issues leaf certificates for
 local domains. Run `gate trust` once to install the root certificate into OS and
-browser trust stores.
+browser trust stores. Run `gate untrust` to remove that root certificate from
+local trust stores without deleting local gate data.
 
 For another device, export the root certificate:
 
@@ -447,6 +448,7 @@ daemon conflicts only when the new process cannot bind the requested address.
 | `gate daemon logs [-g\|--global] [-p name\|--project name] [-a\|--all]` | Print scoped daemon logs. | text |
 | `gate daemon status [-g\|--global] [-p name\|--project name] [-a\|--all]` | Print scoped daemon status. | text / json |
 | `gate trust` | Install the local root CA into trust stores. | text |
+| `gate untrust` | Remove the local root CA from trust stores. | text |
 | `gate ca export` | Export the local root certificate. | text |
 | `gate expose <service> --via <provider> [--auth user:pass]` | Expose a project service through a provider. | text / json |
 | `gate completion <shell>` | Print shell completion. | script |
@@ -557,7 +559,7 @@ Privileged operations:
 
 | Operation | Why permission can be needed | Guardrail |
 | --- | --- | --- |
-| Trusting root CA | OS/browser trust stores are protected | Trust-store integration is isolated behind seams and uses OS-native mechanisms. |
+| Trusting or untrusting root CA | OS/browser trust stores are protected | Trust-store integration is isolated behind seams and uses OS-native mechanisms. |
 | Editing `/etc/hosts` | System file | gate edits only its managed block and validates target ownership/symlink state. |
 | Binding low ports | `:443` and `:80` can require privileges on some systems | Daemon/service manager owns the listener process. |
 

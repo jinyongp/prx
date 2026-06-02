@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"os"
 	"path/filepath"
 	"sync"
@@ -50,6 +51,49 @@ func TestLoadIsIdempotent(t *testing.T) {
 	}
 	if a.Fingerprint() != b.Fingerprint() {
 		t.Fatal("reloading produced a different root CA")
+	}
+}
+
+func TestLoadExistingDoesNotGenerateRoot(t *testing.T) {
+	base := t.TempDir()
+	if _, err := LoadExisting(base); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("LoadExisting error = %v, want ErrNotFound", err)
+	}
+	if _, err := os.Stat(filepath.Join(base, "ca", "root.crt")); !os.IsNotExist(err) {
+		t.Fatalf("LoadExisting generated root cert or stat failed: %v", err)
+	}
+}
+
+func TestLoadExistingLoadsPersistedRoot(t *testing.T) {
+	base := t.TempDir()
+	generated, err := Load(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadExisting(base)
+	if err != nil {
+		t.Fatalf("LoadExisting: %v", err)
+	}
+	if loaded.Fingerprint() != generated.Fingerprint() {
+		t.Fatal("LoadExisting loaded different root CA")
+	}
+}
+
+func TestLoadCertificateDoesNotRequireRootKey(t *testing.T) {
+	base := t.TempDir()
+	generated, err := Load(base)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(base, "ca", "root.key")); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadCertificate(base)
+	if err != nil {
+		t.Fatalf("LoadCertificate: %v", err)
+	}
+	if loaded.Fingerprint() != generated.Fingerprint() {
+		t.Fatal("LoadCertificate loaded different root CA")
 	}
 }
 

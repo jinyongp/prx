@@ -51,6 +51,7 @@ fi
 | `gate daemon logs [-g\|--global] [-p name\|--project name] [-a\|--all]` | print scoped proxy logs |
 | `gate daemon status [-g\|--global] [-p name\|--project name] [-a\|--all] [--json]` | inspect scoped proxy status |
 | `gate trust` | install the root CA (one time) |
+| `gate untrust` | remove the root CA from OS/browser trust stores |
 | `gate ca export [--out path]` | export the root CA for other devices |
 | `gate expose <service> --via <provider> [--auth user:pass] [--json]` | reach a service externally |
 | `gate upgrade [-y\|--yes]` | upgrade to the latest GitHub release |

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -10,6 +11,11 @@ import (
 	"gate/internal/ca"
 	"gate/internal/expose"
 	"gate/internal/paths"
+)
+
+var (
+	trustAuthorityFunc   = func(authority *ca.CA) error { return authority.Trust() }
+	untrustAuthorityFunc = func(authority *ca.CA) error { return authority.Untrust() }
 )
 
 // Trust installs the root CA into the OS and browser trust stores.
@@ -22,13 +28,37 @@ func Trust(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, false, ExitError, "ca", err.Error())
 	}
-	if err := authority.Trust(); err != nil {
+	if err := trustAuthorityFunc(authority); err != nil {
 		if os.IsPermission(err) {
 			return fail(stderr, false, ExitPerm, "permission", err.Error())
 		}
 		return fail(stderr, false, ExitError, "trust", err.Error())
 	}
 	fmt.Fprintf(stdout, "root CA trusted\nfingerprint %s\n", authority.Fingerprint())
+	return ExitOK
+}
+
+// Untrust removes the root CA from the OS and browser trust stores.
+func Untrust(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("untrust", flag.ContinueOnError)
+	if handled, code := parseFlags(fs, "untrust", args, stdout, stderr); handled {
+		return code
+	}
+	authority, err := ca.LoadCertificate(paths.DataDir())
+	if errors.Is(err, ca.ErrNotFound) {
+		fmt.Fprintln(stdout, "root CA not found; nothing to untrust")
+		return ExitOK
+	}
+	if err != nil {
+		return fail(stderr, false, ExitError, "ca", err.Error())
+	}
+	if err := untrustAuthorityFunc(authority); err != nil {
+		if os.IsPermission(err) {
+			return fail(stderr, false, ExitPerm, "permission", err.Error())
+		}
+		return fail(stderr, false, ExitError, "untrust", err.Error())
+	}
+	fmt.Fprintf(stdout, "root CA untrusted\nfingerprint %s\n", authority.Fingerprint())
 	return ExitOK
 }
 

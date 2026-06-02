@@ -32,6 +32,12 @@ gate trust
 > setup. Custom domains can require `/etc/hosts` changes, so commands that
 > reflect DNS may ask for permission.
 
+Remove gate's root CA from local trust stores:
+
+```bash
+gate untrust
+```
+
 ## Project Mode
 
 Project mode uses a `gate.toml` file in the repository. This is the shareable,
@@ -519,6 +525,14 @@ gate completion fish
 
 ## Uninstall
 
+Homebrew install:
+
+```bash
+brew uninstall gate
+```
+
+Install-script install:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstall.sh | sh
 ```
@@ -531,8 +545,10 @@ curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstal
 
 > [!NOTE]
 > The uninstall script removes user-level config, data, state, and known binary
-> paths that exist on the machine. System trust store entries are intentionally
-> left behind.
+> paths that exist on the machine. Before deleting local CA data, it attempts to
+> remove gate's trusted root CA from OS/browser trust stores. Use `--keep-trust`
+> to leave trust store entries in place. Homebrew-managed symlinks are skipped;
+> use `brew uninstall gate` for Homebrew installs.
 
 Legacy single-daemon cleanup, for pre-scoped development builds:
 
