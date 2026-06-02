@@ -98,11 +98,12 @@ Add a mapping:
 gate add web.localhost 3000
 ```
 
-If the daemon is running, routes are hot-reloaded. If it is stopped, starting it
-later loads active standalone routes from the registry:
+Standalone reservations are served by the global daemon. If the global daemon is
+running, routes are hot-reloaded. If it is stopped, starting it later loads
+active standalone routes from the registry:
 
 ```bash
-gate daemon start
+gate daemon start --global
 ```
 
 Run a dev server through the standalone reservation:
@@ -217,7 +218,11 @@ owning config file.
 
 ## Daemon
 
-Start, stop, restart, and inspect the resident proxy:
+Daemons are scoped. Inside a project, daemon commands target that project's
+daemon by default. Outside a project, they target the global daemon for
+standalone reservations.
+
+Start, stop, restart, and inspect the current scoped proxy:
 
 ```bash
 gate daemon start
@@ -227,18 +232,41 @@ gate daemon status
 gate daemon logs
 ```
 
+Control the global daemon from inside any project:
+
+```bash
+gate daemon status --global
+gate daemon stop --global
+```
+
+Target a named project daemon:
+
+```bash
+gate daemon status --project myapp
+```
+
+Inspect or stop all known daemons:
+
+```bash
+gate daemon status --all
+gate daemon stop --all
+```
+
 Start on custom front-proxy ports:
 
 ```bash
 gate daemon start --https-addr 127.0.0.1:18443 --http-addr 127.0.0.1:18080
 ```
 
-`gate up -d` starts the daemon when needed and reloads project routes.
+`gate up -d` starts the current project daemon when needed and reloads only that
+project's routes.
 
 ## JSON Output
 
-Commands that support `--json` write a single JSON object to stdout. Errors in
-JSON mode are written to stderr as an error envelope.
+Commands that support `--json` usually write a single JSON object to stdout.
+Commands that target multiple daemon scopes, such as `gate daemon status --all
+--json`, write a JSON array. Errors in JSON mode are written to stderr as an
+error envelope.
 
 Examples:
 
@@ -505,6 +533,20 @@ curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstal
 > The uninstall script removes user-level config, data, state, and known binary
 > paths that exist on the machine. System trust store entries are intentionally
 > left behind.
+
+Legacy single-daemon cleanup, for pre-scoped development builds:
+
+```bash
+pid_file=~/.config/gate/gate.pid
+if [ -f "$pid_file" ]; then
+  pid="$(tr -dc '0-9' < "$pid_file")"
+  args="$(ps -p "$pid" -o args= 2>/dev/null || true)"
+  case "$args" in gate\ __serve*|*/gate\ __serve*) kill "$pid" ;; esac
+fi
+rm -f ~/.config/gate/gate.sock ~/.config/gate/gate.pid
+rm -f ~/Library/Logs/gate/gate.log
+rm -f "${XDG_STATE_HOME:-$HOME/.local/state}/gate/gate.log"
+```
 
 ## Exit Codes
 

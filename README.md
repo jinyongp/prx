@@ -126,6 +126,10 @@ Run this inside your app repository.
 `.localhost` domains need no DNS setup. Custom domains need `/etc/hosts` or
 another local DNS setup, so `gate up` may ask for administrator approval.
 
+Gate daemons are scoped. `gate up -d` starts or reloads the current project's
+daemon, while standalone mappings created outside a project are served by the
+global daemon. Use `gate daemon status --all` to inspect every known daemon.
+
 ### Environment-backed config
 
 `domain` and `port` can read environment variables when a team needs

@@ -4,13 +4,15 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"gate/internal/daemon"
-	"gate/internal/paths"
 	"gate/internal/port"
 	"gate/internal/proxy"
 	"gate/internal/registry"
@@ -178,8 +180,9 @@ func TestUpDownReloadRunningDaemon(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(shortConfigDir) })
 	t.Setenv("XDG_CONFIG_HOME", shortConfigDir)
+	t.Setenv("XDG_STATE_HOME", shortConfigDir)
 	srv := proxy.New(nil, nil)
-	stop, err := daemon.ServeAdmin(context.Background(), paths.SocketPath(), srv)
+	stop, err := daemon.ServeAdmin(context.Background(), projectDaemonScope("demo").socketPath(), srv)
 	if err != nil {
 		t.Fatalf("ServeAdmin: %v", err)
 	}
@@ -216,8 +219,9 @@ func TestUpDaemonStartsAndReloads(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = os.RemoveAll(shortConfigDir) })
 	t.Setenv("XDG_CONFIG_HOME", shortConfigDir)
+	t.Setenv("XDG_STATE_HOME", shortConfigDir)
 	srv := proxy.New(nil, nil)
-	stop, err := daemon.ServeAdmin(context.Background(), paths.SocketPath(), srv)
+	stop, err := daemon.ServeAdmin(context.Background(), projectDaemonScope("demo").socketPath(), srv)
 	if err != nil {
 		t.Fatalf("ServeAdmin: %v", err)
 	}
@@ -239,5 +243,118 @@ func TestUpDaemonStartsAndReloads(t *testing.T) {
 	}
 	if srv.RouteCount() != 2 {
 		t.Fatalf("route count = %d, want 2", srv.RouteCount())
+	}
+}
+
+func TestUpDaemonSpawnsScopedDaemonAndWritesState(t *testing.T) {
+	setupUpProject(t)
+	shortConfigDir, err := os.MkdirTemp("/tmp", "gate-cli-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(shortConfigDir) })
+	t.Setenv("XDG_CONFIG_HOME", shortConfigDir)
+	t.Setenv("XDG_STATE_HOME", shortConfigDir)
+	oldNewDaemonServeCommand := newDaemonServeCommand
+	t.Cleanup(func() { newDaemonServeCommand = oldNewDaemonServeCommand })
+	newDaemonServeCommand = func(_, socketPath, _, _ string) *exec.Cmd {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		//nolint:gosec // G204: test launches this same test binary as a helper process.
+		cmd := exec.Command(exe, "-test.run=TestDaemonStartHelperProcess", "--", "__serve")
+		cmd.Env = append(os.Environ(), "GATE_TEST_DAEMON_START_HELPER=serve-admin", "GATE_TEST_DAEMON_SOCKET="+socketPath)
+		return cmd
+	}
+
+	var out, errb bytes.Buffer
+	if code := Up([]string{"--daemon", "--json"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Up exit = %d, stderr=%s", code, errb.String())
+	}
+	scope := projectDaemonScope("demo")
+	if _, err := os.Stat(scope.pidPath()); err != nil {
+		t.Fatalf("pid file missing: %v", err)
+	}
+	if _, err := os.Stat(scope.logPath()); err != nil {
+		t.Fatalf("log file missing: %v", err)
+	}
+	st, err := daemonClientFor(scope).Status()
+	if err != nil {
+		t.Fatalf("daemon status: %v", err)
+	}
+	if st.Routes != 2 {
+		t.Fatalf("routes = %d, want 2", st.Routes)
+	}
+	_ = stopDaemonProcess(daemonClientFor(scope), st.PID, 2*time.Second)
+}
+
+func TestUpDaemonCleansUpSpawnedDaemonWhenReloadFails(t *testing.T) {
+	setupUpProject(t)
+	shortConfigDir, err := os.MkdirTemp("/tmp", "gate-cli-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(shortConfigDir) })
+	t.Setenv("XDG_CONFIG_HOME", shortConfigDir)
+	t.Setenv("XDG_STATE_HOME", shortConfigDir)
+	oldNewDaemonServeCommand := newDaemonServeCommand
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() {
+		newDaemonServeCommand = oldNewDaemonServeCommand
+		setDaemonRoutesFunc = oldSetRoutes
+	})
+	newDaemonServeCommand = func(_, socketPath, _, _ string) *exec.Cmd {
+		exe, err := os.Executable()
+		if err != nil {
+			t.Fatal(err)
+		}
+		//nolint:gosec // G204: test launches this same test binary as a helper process.
+		cmd := exec.Command(exe, "-test.run=TestDaemonStartHelperProcess", "--", "__serve")
+		cmd.Env = append(os.Environ(), "GATE_TEST_DAEMON_START_HELPER=serve-admin", "GATE_TEST_DAEMON_SOCKET="+socketPath)
+		return cmd
+	}
+	setDaemonRoutesFunc = func(_ daemonScope, _ []proxy.Route) error {
+		return errors.New("reload failed")
+	}
+
+	var out, errb bytes.Buffer
+	if code := Up([]string{"--daemon", "--json"}, &out, &errb); code != ExitError {
+		t.Fatalf("Up exit = %d, want reload failure", code)
+	}
+	scope := projectDaemonScope("demo")
+	if _, err := os.Stat(scope.pidPath()); !os.IsNotExist(err) {
+		t.Fatalf("pid file still exists or stat failed: %v", err)
+	}
+	client := daemonClientFor(scope)
+	for i := 0; i < 50 && client.IsRunning(); i++ {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if client.IsRunning() {
+		t.Fatal("spawned daemon still running after reload failure")
+	}
+}
+
+func TestActiveRoutesForScope(t *testing.T) {
+	reg := registry.New()
+	for _, res := range []registry.Reservation{
+		{Project: "demo", Service: "web", Domain: "web.localhost", Port: 4300, Active: true},
+		{Project: "other", Service: "web", Domain: "other.localhost", Port: 4301, Active: true},
+		{Service: "standalone.localhost", Domain: "standalone.localhost", Port: 4302, Standalone: true, Active: true},
+		{Service: "legacy.localhost", Domain: "legacy.localhost", Port: 4304, Active: true},
+		{Project: "demo", Service: "off", Domain: "off.localhost", Port: 4303},
+	} {
+		if err := reg.Reserve(res); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	projectRoutes := activeRoutesForScope(reg, projectDaemonScope("demo"))
+	if len(projectRoutes) != 1 || projectRoutes[0].Domain != "web.localhost" {
+		t.Fatalf("project routes = %+v", projectRoutes)
+	}
+	globalRoutes := activeRoutesForScope(reg, globalDaemonScope())
+	if len(globalRoutes) != 1 || globalRoutes[0].Domain != "standalone.localhost" {
+		t.Fatalf("global routes = %+v", globalRoutes)
 	}
 }

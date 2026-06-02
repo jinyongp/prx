@@ -34,9 +34,19 @@ func RuntimeDir() string {
 	return ConfigDir()
 }
 
-// SocketPath returns the path of the daemon admin control socket.
-func SocketPath() string {
-	return filepath.Join(RuntimeDir(), "gate.sock")
+// DaemonSocketPath returns the scoped daemon admin control socket path.
+func DaemonSocketPath(scope string) string {
+	return filepath.Join(RuntimeDir(), "daemons", scope+".sock")
+}
+
+// DaemonPIDPath returns the scoped daemon pid file path.
+func DaemonPIDPath(scope string) string {
+	return filepath.Join(ConfigDir(), "daemons", scope+".pid")
+}
+
+// DaemonLogPath returns the scoped daemon log file path.
+func DaemonLogPath(scope string) string {
+	return filepath.Join(StateDir(), "daemons", scope+".log")
 }
 
 // Ensure creates dir (mode 0700) if it does not exist and returns it.

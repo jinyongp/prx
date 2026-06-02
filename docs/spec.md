@@ -82,10 +82,11 @@ flowchart TB
     https --> tls
 ```
 
-The CLI computes desired state from project config and the registry. If the
-daemon is running, the CLI pushes the active route table through the admin
-socket. If the daemon is not running, route reservations still persist and can be
-loaded later.
+The CLI computes desired state from project config and the registry. Daemons are
+scoped: project daemons serve one project, and the global daemon serves
+standalone reservations. If the relevant daemon is running, the CLI pushes that
+scope's active route table through its admin socket. If the daemon is not
+running, route reservations still persist and can be loaded later.
 
 ---
 
@@ -193,7 +194,7 @@ flowchart LR
     gatetoml["gate.toml<br/>user-owned"]
     cfgdir["Config dir<br/>~/.config/gate"]
     registry["registry.json<br/>tool-owned"]
-    sock["gate.sock<br/>admin socket"]
+    sockets["daemons/*.sock<br/>scoped admin sockets"]
     datadir["Data dir<br/>~/.local/share/gate"]
     ca["root CA and cert cache"]
     statedir["State dir<br/>logs and runtime state"]
@@ -201,7 +202,7 @@ flowchart LR
 
     project --> gatetoml
     cfgdir --> registry
-    cfgdir --> sock
+    cfgdir --> sockets
     datadir --> ca
     statedir --> logs
 ```
@@ -210,7 +211,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `gate.toml` | user and CLI | TOML | Shareable project config. Edited surgically so comments and surrounding formatting survive. |
 | `registry.json` | gate only | JSON | Machine-wide reservations. Uses schema versioning, advisory file locking, and atomic write by temp file + rename. |
-| Admin socket | daemon | Unix socket | CLI talks to daemon over a local HTTP API. |
+| Admin sockets | daemon | Unix sockets | CLI talks to scoped daemons over a local HTTP API. |
 | CA material | gate | PEM files | Root key is private local state and must not be copied. Export only the root certificate. |
 | Logs | gate / OS service manager | text or JSONL | Runtime and access logs are separate from command data output. |
 
@@ -229,6 +230,14 @@ Registry schema:
       "dns": "localhost",
       "active": true,
       "config_path": "/repo/gate.toml"
+    },
+    "/standalone.localhost": {
+      "service": "standalone.localhost",
+      "domain": "standalone.localhost",
+      "port": 4301,
+      "tls": "internal",
+      "standalone": true,
+      "active": true
     }
   }
 }
@@ -382,20 +391,21 @@ Implementation notes:
 
 ## 10. Daemon and Admin Socket
 
-The daemon owns the front proxy listeners. The CLI controls it over a Unix-domain
-socket.
+Each daemon owns one pair of front proxy listeners. The CLI controls each daemon
+over a scoped Unix-domain socket.
 
 ```mermaid
 flowchart LR
     cli["gate up -d"]
     store["update registry"]
     dns["ensure DNS"]
-    start{"daemon running?"}
-    launch["start daemon"]
-    push["PUT /routes"]
+    scope["resolve scope<br/>project:name or global"]
+    start{"scoped daemon running?"}
+    launch["start scoped daemon"]
+    push["PUT scoped /routes"]
     active["new route table active"]
 
-    cli --> store --> dns --> start
+    cli --> store --> dns --> scope --> start
     start -->|"no and --daemon/-d"| launch --> push
     start -->|"yes"| push
     start -->|"no and no -d"| note["print note: no daemon running"]
@@ -410,9 +420,10 @@ Admin API:
 | `PUT` | `/routes` | Replace the active route table. |
 | `POST` | `/reload` | Reserved reload endpoint; currently reports reload success. |
 
-Only one daemon should own the configured HTTPS/HTTP listen addresses. If a
-daemon is already running on different addresses, `gate up -d` refuses with a
-conflict.
+Only one daemon can own a given HTTPS/HTTP listen address pair. Different
+project daemons can run at the same time when their listen addresses do not
+conflict. `gate up -d` checks only the current project daemon; a different
+daemon conflicts only when the new process cannot bind the requested address.
 
 ---
 
@@ -430,9 +441,11 @@ conflict.
 | `gate rm --project [name]` | Remove project reservations. | text / json |
 | `gate prune` | Remove reservations whose owning config no longer exists. | text / json |
 | `gate run <service> -- <cmd>` | Run a child command with `PORT` injected. | child stdio |
-| `gate daemon start [--https-addr addr] [--http-addr addr]` | Start the resident proxy. | text |
-| `gate daemon stop\|restart\|logs` | Stop, restart, or print logs for the resident proxy. | text |
-| `gate daemon status` | Print daemon status. | text / json |
+| `gate daemon start [-g\|--global] [-p name\|--project name] [--https-addr addr] [--http-addr addr]` | Start the scoped resident proxy. | text |
+| `gate daemon stop [-g\|--global] [-p name\|--project name] [-a\|--all]` | Stop scoped daemon(s). | text |
+| `gate daemon restart [-g\|--global] [-p name\|--project name] [--https-addr addr] [--http-addr addr]` | Restart one scoped daemon. | text |
+| `gate daemon logs [-g\|--global] [-p name\|--project name] [-a\|--all]` | Print scoped daemon logs. | text |
+| `gate daemon status [-g\|--global] [-p name\|--project name] [-a\|--all]` | Print scoped daemon status. | text / json |
 | `gate trust` | Install the local root CA into trust stores. | text |
 | `gate ca export` | Export the local root certificate. | text |
 | `gate expose <service> --via <provider> [--auth user:pass]` | Expose a project service through a provider. | text / json |

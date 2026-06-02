@@ -115,7 +115,7 @@ if [ -s "$SORTED_FILE" ]; then
 fi
 
 stop_daemon() {
-  pid_file="$1/gate.pid"
+  pid_file="$1"
   if [ ! -f "$pid_file" ]; then
     return
   fi
@@ -136,6 +136,16 @@ stop_daemon() {
   fi
 }
 
+stop_daemons_in_dir() {
+  root="$1"
+  stop_daemon "$root/gate.pid"
+  if [ -d "$root/daemons" ]; then
+    find "$root/daemons" -type f -name '*.pid' -print | while IFS= read -r pid_file; do
+      stop_daemon "$pid_file"
+    done
+  fi
+}
+
 while IFS= read -r target; do
   if [ ! -e "$target" ] && [ ! -L "$target" ]; then
     continue
@@ -143,7 +153,7 @@ while IFS= read -r target; do
 
   if [ -d "$target" ]; then
     if [ "$(basename "$target")" = "gate" ]; then
-      stop_daemon "$target"
+      stop_daemons_in_dir "$target"
     fi
     if rm -rf "$target"; then status=0; else status=$?; fi
   elif [ -f "$target" ] || [ -L "$target" ]; then

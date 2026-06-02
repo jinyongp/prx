@@ -8,7 +8,6 @@ import (
 	"os"
 
 	"gate/internal/ca"
-	"gate/internal/daemon"
 	"gate/internal/expose"
 	"gate/internal/paths"
 )
@@ -98,10 +97,11 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 	// Mark the route exposed (so non-loopback clients are allowed) and apply
 	// optional auth, then hot-reload the daemon. Auth is session-scoped: it
 	// lives in the in-memory route table, not the persisted registry.
-	client := daemon.NewClient(paths.SocketPath())
+	scope := projectDaemonScope(project.Name)
+	client := daemonClientFor(scope)
 	if client.IsRunning() {
 		if reg, rerr := registryStore().Read(); rerr == nil {
-			routes := activeRoutes(reg)
+			routes := activeRoutesForScope(reg, scope)
 			for i := range routes {
 				if routes[i].Domain == service.Domain {
 					routes[i].Exposed = true

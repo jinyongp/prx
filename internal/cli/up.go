@@ -11,9 +11,7 @@ import (
 	"strings"
 
 	"gate/internal/config"
-	"gate/internal/daemon"
 	"gate/internal/dns"
-	"gate/internal/paths"
 	"gate/internal/port"
 	"gate/internal/proxy"
 	"gate/internal/registry"
@@ -42,11 +40,13 @@ func Up(args []string, stdout, stderr io.Writer) int {
 	if *dnsMode != "" && *dnsMode != "localhost" && *dnsMode != "hosts" {
 		return fail(stderr, *jsonOut, ExitUsage, "bad_dns", "dns must be localhost or hosts")
 	}
+	httpsAddrSet, httpAddrSet := flagSet(fs, "https-addr"), flagSet(fs, "http-addr")
 
 	project, path, err := currentProjectPath()
 	if err != nil {
 		return fail(stderr, *jsonOut, ExitError, "no_project", err.Error())
 	}
+	scope := projectDaemonScope(project.Name)
 
 	var results []upResult
 	var routes []proxy.Route
@@ -70,7 +70,7 @@ func Up(args []string, stdout, stderr io.Writer) int {
 			}
 			results = append(results, upResult{Service: name, Domain: svc.Domain, Port: p, Allocated: allocated})
 		}
-		routes = activeRoutes(reg)
+		routes = activeRoutesForScope(reg, scope)
 		return nil
 	})
 	var ce *registry.ConflictError
@@ -90,24 +90,29 @@ func Up(args []string, stdout, stderr io.Writer) int {
 
 	reloaded := false
 	actualHTTPSAddr := ""
-	client := daemon.NewClient(paths.SocketPath())
+	startedPID := 0
+	client := daemonClientFor(scope)
 	if *startDaemon {
 		if st, err := client.Status(); err == nil {
-			if !daemonListenMatches(st, *httpsAddr, *httpAddr) {
+			if !daemonExplicitListenMatches(st, *httpsAddr, *httpAddr, httpsAddrSet, httpAddrSet) {
 				msg := fmt.Sprintf("daemon already running on https %s · http %s; requested https %s · http %s; run `gate daemon stop` first",
 					displayListenAddr(st.HTTPSAddr), displayListenAddr(st.HTTPAddr), *httpsAddr, *httpAddr)
 				return fail(stderr, *jsonOut, ExitConflict, "daemon_start", msg)
 			}
 		} else {
-			result := startDaemonCommand(newDaemonServeCommand(executablePath(), *httpsAddr, *httpAddr), client)
+			result := startDaemonCommand(newDaemonServeCommand(executablePath(), scope.socketPath(), *httpsAddr, *httpAddr), client, scope)
 			if result.Code != ExitOK {
 				return fail(stderr, *jsonOut, result.Code, "daemon_start", result.Message)
 			}
+			startedPID = result.PID
 		}
 	}
 	if client.IsRunning() {
-		if err := client.SetRoutes(routes); err != nil {
-			return fail(stderr, *jsonOut, ExitError, "reload_failed", err.Error())
+		if code := reloadDaemonRoutes(scope, routes, stderr, *jsonOut); code != ExitOK {
+			if startedPID != 0 {
+				cleanupStartedDaemon(client, scope, startedPID)
+			}
+			return code
 		}
 		if st, err := client.Status(); err == nil {
 			actualHTTPSAddr = st.HTTPSAddr
@@ -185,6 +190,7 @@ func Down(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, *jsonOut, ExitError, "no_project", err.Error())
 	}
+	scope := projectDaemonScope(project.Name)
 
 	var routes []proxy.Route
 	err = registryStore().Update(func(reg *registry.Registry) error {
@@ -195,7 +201,7 @@ func Down(args []string, stdout, stderr io.Writer) int {
 				_ = reg.Reserve(res)
 			}
 		}
-		routes = activeRoutes(reg)
+		routes = activeRoutesForScope(reg, scope)
 		return nil
 	})
 	if err != nil {
@@ -207,7 +213,7 @@ func Down(args []string, stdout, stderr io.Writer) int {
 		_ = dns.Select(svc.Domain, "").Remove(svc.Domain)
 	}
 
-	client := daemon.NewClient(paths.SocketPath())
+	client := daemonClientFor(scope)
 	if client.IsRunning() {
 		_ = client.SetRoutes(routes)
 	}
@@ -245,13 +251,20 @@ func ensureDNS(project *config.Project, mode string, stderr io.Writer, jsonOut b
 	return ExitOK
 }
 
-func activeRoutes(reg *registry.Registry) []proxy.Route {
+func activeRoutesForScope(reg *registry.Registry, scope daemonScope) []proxy.Route {
 	var rs []proxy.Route
 	for _, k := range reg.Keys() {
 		res := reg.Services[k]
-		if res.Active && res.Port != 0 {
-			rs = append(rs, proxy.Route{Domain: res.Domain, Upstream: fmt.Sprintf("127.0.0.1:%d", res.Port)})
+		if !res.Active || res.Port == 0 {
+			continue
 		}
+		if scope.Kind == daemonScopeProject && res.Project != scope.Name {
+			continue
+		}
+		if scope.Kind == daemonScopeGlobal && (res.Project != "" || !res.Standalone) {
+			continue
+		}
+		rs = append(rs, proxy.Route{Domain: res.Domain, Upstream: fmt.Sprintf("127.0.0.1:%d", res.Port)})
 	}
 	return rs
 }

@@ -15,6 +15,8 @@ import (
 
 // Status is the daemon's reported state.
 type Status struct {
+	Scope     string `json:"scope,omitempty"`
+	ScopeKey  string `json:"-"`
 	Running   bool   `json:"running"`
 	PID       int    `json:"pid"`
 	Routes    int    `json:"routes"`

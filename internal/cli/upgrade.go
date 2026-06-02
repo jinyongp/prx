@@ -14,7 +14,6 @@ import (
 	"time"
 
 	"gate/internal/daemon"
-	"gate/internal/paths"
 	"gate/internal/ui"
 )
 
@@ -58,8 +57,8 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 	if latestTag != "" {
 		if current := normalizedVersion(currentVersion); current != "" && current != "dev" {
 			if normalizedVersion(latestTag) == current {
-				daemonBefore, daemonWasRunning := daemonStatusBeforeUpgrade()
-				return completeUpToDate(stdout, stderr, currentVersion, daemonBefore, daemonWasRunning)
+				daemonsBefore := daemonStatusesBeforeUpgrade()
+				return completeUpToDate(stdout, stderr, currentVersion, daemonsBefore)
 			}
 		}
 	} else {
@@ -71,7 +70,7 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 		return ExitOK
 	}
 
-	daemonBefore, daemonWasRunning := daemonStatusBeforeUpgrade()
+	daemonsBefore := daemonStatusesBeforeUpgrade()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upgradeScriptURL, nil)
 	if err != nil {
@@ -114,48 +113,91 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 	if err := cmd.Run(); err != nil {
 		return fail(stderr, false, ExitError, "upgrade", err.Error())
 	}
-	return completeUpgrade(stdout, stderr, daemonBefore, daemonWasRunning)
+	return completeUpgrade(stdout, stderr, daemonsBefore)
 }
 
-func daemonStatusBeforeUpgrade() (daemon.Status, bool) {
-	st, err := daemon.NewClient(paths.SocketPath()).Status()
-	return st, err == nil
-}
-
-func completeUpgrade(stdout, stderr io.Writer, daemonBefore daemon.Status, daemonWasRunning bool) int {
-	if daemonWasRunning {
-		if code := restartDaemonAfterUpgradeFunc(daemonBefore, stdout, stderr); code != ExitOK {
-			return code
+func daemonStatusesBeforeUpgrade() []daemon.Status {
+	scopes, err := allDaemonScopes()
+	if err != nil {
+		scope, serr := currentDaemonScope()
+		if serr != nil {
+			scope = globalDaemonScope()
 		}
+		scopes = []daemonScope{scope}
+	}
+	var statuses []daemon.Status
+	for _, scope := range scopes {
+		st, err := daemonClientFor(scope).Status()
+		if err != nil {
+			continue
+		}
+		st.Scope = scope.String()
+		st.ScopeKey = scope.fileKey()
+		statuses = append(statuses, st)
+	}
+	return statuses
+}
+
+func completeUpgrade(stdout, stderr io.Writer, daemonsBefore []daemon.Status) int {
+	code := ExitOK
+	for _, st := range daemonsBefore {
+		if nextCode := restartDaemonAfterUpgradeFunc(st, stdout, stderr); nextCode != ExitOK && code == ExitOK {
+			code = nextCode
+		}
+	}
+	if code != ExitOK {
+		return code
 	}
 	printUpgradeStatus(stdout, "upgrade complete")
 	return ExitOK
 }
 
-func completeUpToDate(stdout, stderr io.Writer, version string, daemonBefore daemon.Status, daemonWasRunning bool) int {
-	if daemonWasRunning {
-		if code := restartDaemonAfterUpgradeFunc(daemonBefore, stdout, stderr); code != ExitOK {
-			return code
+func completeUpToDate(stdout, stderr io.Writer, version string, daemonsBefore []daemon.Status) int {
+	code := ExitOK
+	for _, st := range daemonsBefore {
+		if nextCode := restartDaemonAfterUpgradeFunc(st, stdout, stderr); nextCode != ExitOK && code == ExitOK {
+			code = nextCode
 		}
+	}
+	if code != ExitOK {
+		return code
 	}
 	printUpgradeStatus(stdout, fmt.Sprintf("up to date (%s)", version))
 	return ExitOK
 }
 
 func restartDaemonAfterUpgrade(st daemon.Status, stdout, stderr io.Writer) int {
-	client := daemon.NewClient(paths.SocketPath())
+	scope := scopeFromDaemonStatus(st)
+	client := daemonClientFor(scope)
 	if err := stopDaemonProcess(client, st.PID, 5*time.Second); err != nil {
 		return fail(stderr, false, ExitError, "upgrade", "failed to restart daemon: "+err.Error())
 	}
 
 	httpsAddr := restartListenAddr(st.HTTPSAddr, defaultDaemonHTTPSAddr)
 	httpAddr := restartListenAddr(st.HTTPAddr, defaultDaemonHTTPAddr)
-	result := startDaemonCommand(newDaemonServeCommand(executablePath(), httpsAddr, httpAddr), client)
+	result := startDaemonCommand(newDaemonServeCommand(executablePath(), scope.socketPath(), httpsAddr, httpAddr), client, scope)
 	if result.Code != ExitOK {
 		return fail(stderr, false, result.Code, "upgrade", "failed to restart daemon: "+result.Message)
 	}
+	if err := setDaemonRoutesForScope(scope); err != nil {
+		cleanupStartedDaemon(client, scope, result.PID)
+		return fail(stderr, false, ExitError, "upgrade", "failed to reload daemon routes: "+err.Error())
+	}
 	fmt.Fprintf(stdout, "daemon restarted · pid %d · https %s · http %s\n", result.PID, httpsAddr, httpAddr)
 	return ExitOK
+}
+
+func scopeFromDaemonStatus(st daemon.Status) daemonScope {
+	if st.ScopeKey != "" {
+		if strings.HasPrefix(st.ScopeKey, "project-") {
+			return daemonScope{Kind: daemonScopeProject, Name: strings.TrimPrefix(st.Scope, "project:"), Key: st.ScopeKey}
+		}
+		return daemonScope{Kind: daemonScopeGlobal, Key: st.ScopeKey}
+	}
+	if strings.HasPrefix(st.Scope, "project:") {
+		return projectDaemonScope(strings.TrimPrefix(st.Scope, "project:"))
+	}
+	return globalDaemonScope()
 }
 
 func restartListenAddr(actual, fallback string) string {

@@ -189,7 +189,7 @@ func TestAddStandaloneActivatesDNSAndRoutes(t *testing.T) {
 		}
 	}
 	var routes []proxy.Route
-	setDaemonRoutesFunc = func(next []proxy.Route) error {
+	setDaemonRoutesFunc = func(_ daemonScope, next []proxy.Route) error {
 		routes = append([]proxy.Route{}, next...)
 		return nil
 	}
@@ -203,7 +203,7 @@ func TestAddStandaloneActivatesDNSAndRoutes(t *testing.T) {
 		t.Fatal(err)
 	}
 	res, ok := reg.Get(registry.Key("", "web.localhost"))
-	if !ok || !res.Adhoc || !res.Active || res.Port != 4312 {
+	if !ok || !res.Standalone || !res.Active || res.Port != 4312 {
 		t.Fatalf("standalone reservation = %+v, ok=%v", res, ok)
 	}
 	if len(ensured) != 1 || ensured[0] != "web.localhost" {
@@ -214,16 +214,121 @@ func TestAddStandaloneActivatesDNSAndRoutes(t *testing.T) {
 	}
 }
 
+func TestAddStandaloneRestoresExistingReservationWhenReloadFails(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{
+			Service:    "web.localhost",
+			Domain:     "web.localhost",
+			Port:       4312,
+			DNS:        "localhost",
+			Standalone: true,
+			Active:     true,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldSelect := selectDNSProvider
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() {
+		selectDNSProvider = oldSelect
+		setDaemonRoutesFunc = oldSetRoutes
+	})
+	var removed []string
+	selectDNSProvider = func(_, _ string) dns.Provider {
+		return fakeDNSProvider{
+			remove: func(domain string) error {
+				removed = append(removed, domain)
+				return nil
+			},
+		}
+	}
+	calls := 0
+	setDaemonRoutesFunc = func(_ daemonScope, _ []proxy.Route) error {
+		calls++
+		if calls == 1 {
+			return errors.New("reload failed")
+		}
+		return nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Add([]string{"web.localhost", "4313"}, &out, &errb); code != ExitError {
+		t.Fatalf("Add exit = %d, want reload failure", code)
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, ok := reg.Get(registry.Key("", "web.localhost"))
+	if !ok || res.Port != 4312 {
+		t.Fatalf("reservation = %+v, ok=%v; want old port", res, ok)
+	}
+	if len(removed) != 0 {
+		t.Fatalf("DNS removed for existing reservation: %v", removed)
+	}
+}
+
+func TestAddStandaloneRemovesNewReservationWhenReloadFails(t *testing.T) {
+	isolate(t)
+	oldSelect := selectDNSProvider
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() {
+		selectDNSProvider = oldSelect
+		setDaemonRoutesFunc = oldSetRoutes
+	})
+	var removed []string
+	selectDNSProvider = func(_, _ string) dns.Provider {
+		return fakeDNSProvider{
+			remove: func(domain string) error {
+				removed = append(removed, domain)
+				return nil
+			},
+		}
+	}
+	var scopes []string
+	var routesCalls [][]proxy.Route
+	setDaemonRoutesFunc = func(scope daemonScope, routes []proxy.Route) error {
+		scopes = append(scopes, scope.String())
+		routesCalls = append(routesCalls, append([]proxy.Route{}, routes...))
+		if len(scopes) == 1 {
+			return errors.New("reload failed")
+		}
+		return nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Add([]string{"web.localhost", "4312"}, &out, &errb); code != ExitError {
+		t.Fatalf("Add exit = %d, want reload failure", code)
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.Get(registry.Key("", "web.localhost")); ok {
+		t.Fatal("new standalone reservation should be removed after reload failure")
+	}
+	if len(removed) != 1 || removed[0] != "web.localhost" {
+		t.Fatalf("DNS removed = %v", removed)
+	}
+	if len(scopes) != 2 || scopes[0] != "global" || scopes[1] != "global" {
+		t.Fatalf("reload scopes = %v", scopes)
+	}
+	if len(routesCalls[1]) != 0 {
+		t.Fatalf("restored routes = %+v, want empty", routesCalls[1])
+	}
+}
+
 func TestRmStandaloneRemovesDNSAndRoutes(t *testing.T) {
 	isolate(t)
 	if err := registryStore().Update(func(r *registry.Registry) error {
 		return r.Reserve(registry.Reservation{
-			Service: "web.localhost",
-			Domain:  "web.localhost",
-			Port:    4312,
-			DNS:     "localhost",
-			Adhoc:   true,
-			Active:  true,
+			Service:    "web.localhost",
+			Domain:     "web.localhost",
+			Port:       4312,
+			DNS:        "localhost",
+			Standalone: true,
+			Active:     true,
 		})
 	}); err != nil {
 		t.Fatal(err)
@@ -244,7 +349,7 @@ func TestRmStandaloneRemovesDNSAndRoutes(t *testing.T) {
 		}
 	}
 	var routes []proxy.Route
-	setDaemonRoutesFunc = func(next []proxy.Route) error {
+	setDaemonRoutesFunc = func(_ daemonScope, next []proxy.Route) error {
 		routes = append([]proxy.Route{}, next...)
 		return nil
 	}
@@ -265,6 +370,163 @@ func TestRmStandaloneRemovesDNSAndRoutes(t *testing.T) {
 	}
 	if len(routes) != 0 {
 		t.Fatalf("routes = %+v, want empty", routes)
+	}
+}
+
+func TestRmStandaloneRestoresReservationWhenReloadFails(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{
+			Service:    "web.localhost",
+			Domain:     "web.localhost",
+			Port:       4312,
+			DNS:        "localhost",
+			Standalone: true,
+			Active:     true,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldSelect := selectDNSProvider
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() {
+		selectDNSProvider = oldSelect
+		setDaemonRoutesFunc = oldSetRoutes
+	})
+	var removed []string
+	selectDNSProvider = func(_, _ string) dns.Provider {
+		return fakeDNSProvider{
+			remove: func(domain string) error {
+				removed = append(removed, domain)
+				return nil
+			},
+		}
+	}
+	var scopes []string
+	setDaemonRoutesFunc = func(scope daemonScope, _ []proxy.Route) error {
+		scopes = append(scopes, scope.String())
+		if len(scopes) == 1 {
+			return errors.New("reload failed")
+		}
+		return nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Rm([]string{"web.localhost"}, &out, &errb); code != ExitError {
+		t.Fatalf("Rm exit = %d, want reload failure", code)
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.Get(registry.Key("", "web.localhost")); !ok {
+		t.Fatal("standalone reservation should be restored after reload failure")
+	}
+	if len(removed) != 0 {
+		t.Fatalf("DNS should not be removed before reload succeeds: %v", removed)
+	}
+	if len(scopes) != 2 || scopes[0] != "global" || scopes[1] != "global" {
+		t.Fatalf("reload scopes = %v", scopes)
+	}
+}
+
+func TestRmStandaloneRestoresReservationWhenDNSFails(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{
+			Service:    "web.localhost",
+			Domain:     "web.localhost",
+			Port:       4312,
+			DNS:        "localhost",
+			Standalone: true,
+			Active:     true,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldSelect := selectDNSProvider
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() {
+		selectDNSProvider = oldSelect
+		setDaemonRoutesFunc = oldSetRoutes
+	})
+	selectDNSProvider = func(_, _ string) dns.Provider {
+		return fakeDNSProvider{
+			remove: func(string) error {
+				return errors.New("dns failed")
+			},
+		}
+	}
+	var scopes []string
+	var routesCalls [][]proxy.Route
+	setDaemonRoutesFunc = func(scope daemonScope, routes []proxy.Route) error {
+		scopes = append(scopes, scope.String())
+		routesCalls = append(routesCalls, append([]proxy.Route{}, routes...))
+		return nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Rm([]string{"web.localhost"}, &out, &errb); code != ExitError {
+		t.Fatalf("Rm exit = %d, want DNS failure", code)
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.Get(registry.Key("", "web.localhost")); !ok {
+		t.Fatal("standalone reservation should be restored after DNS failure")
+	}
+	if len(scopes) != 2 || scopes[0] != "global" || scopes[1] != "global" {
+		t.Fatalf("reload scopes = %v", scopes)
+	}
+	if len(routesCalls) != 2 || len(routesCalls[1]) != 1 || routesCalls[1][0].Domain != "web.localhost" {
+		t.Fatalf("routes calls = %+v", routesCalls)
+	}
+}
+
+func TestRmStandaloneInsideUnrelatedProjectUsesGlobalScope(t *testing.T) {
+	isolate(t)
+	dir := t.TempDir()
+	body := "[project]\nname = \"demo\"\n\n[services.api]\ndomain = \"api.demo.localhost\"\n"
+	path := filepath.Join(dir, "gate.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{
+			Service:    "web.localhost",
+			Domain:     "web.localhost",
+			Port:       4312,
+			DNS:        "localhost",
+			Standalone: true,
+			Active:     true,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldSelect := selectDNSProvider
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() {
+		selectDNSProvider = oldSelect
+		setDaemonRoutesFunc = oldSetRoutes
+	})
+	selectDNSProvider = func(_, _ string) dns.Provider { return fakeDNSProvider{} }
+	var scopes []string
+	setDaemonRoutesFunc = func(scope daemonScope, _ []proxy.Route) error {
+		scopes = append(scopes, scope.String())
+		return nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Rm([]string{"web.localhost"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Rm exit = %d, stderr=%s", code, errb.String())
+	}
+	if got, err := os.ReadFile(path); err != nil || string(got) != body {
+		t.Fatalf("project config changed or read failed: %v\n%s", err, got)
+	}
+	if len(scopes) != 1 || scopes[0] != "global" {
+		t.Fatalf("reload scopes = %v", scopes)
 	}
 }
 
@@ -307,6 +569,54 @@ func TestAddRmSyncProjectConfig(t *testing.T) {
 	reg, _ = registryStore().Read()
 	if _, ok := reg.Get(registry.Key("demo", "api")); ok {
 		t.Fatal("registry service not removed")
+	}
+}
+
+func TestRmProjectServiceRestoresConfigAndRegistryWhenReloadFails(t *testing.T) {
+	isolate(t)
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() { setDaemonRoutesFunc = oldSetRoutes })
+	calls := 0
+	setDaemonRoutesFunc = func(scope daemonScope, _ []proxy.Route) error {
+		if scope.String() != "project:demo" {
+			t.Fatalf("scope = %q, want project:demo", scope.String())
+		}
+		calls++
+		if calls == 1 {
+			return errors.New("reload failed")
+		}
+		return nil
+	}
+	dir := t.TempDir()
+	body := "# keep project comment\n[project]\nname = \"demo\"\n\n# keep service comment\n[services.api]\ndomain = \"api.demo.localhost\"\nport = 4312\n"
+	path := filepath.Join(dir, "gate.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Project: "demo", Service: "api", Domain: "api.demo.localhost", Port: 4312, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Rm([]string{"api.demo.localhost"}, &out, &errb); code != ExitError {
+		t.Fatalf("Rm exit = %d, want reload failure", code)
+	}
+	edited, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(edited) != body {
+		t.Fatalf("config not restored byte-identical:\n%s", edited)
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.Get(registry.Key("demo", "api")); !ok {
+		t.Fatal("registry service not restored")
 	}
 }
 
@@ -470,7 +780,7 @@ func TestRmProjectRestoresRegistryWhenReloadFails(t *testing.T) {
 	oldSetRoutes := setDaemonRoutesFunc
 	t.Cleanup(func() { setDaemonRoutesFunc = oldSetRoutes })
 	calls := 0
-	setDaemonRoutesFunc = func([]proxy.Route) error {
+	setDaemonRoutesFunc = func(_ daemonScope, _ []proxy.Route) error {
 		calls++
 		if calls == 1 {
 			return errors.New("reload failed")
@@ -507,7 +817,7 @@ func TestRmProjectReportsRollbackFailureWhenRouteRestoreFails(t *testing.T) {
 	isolate(t)
 	oldSetRoutes := setDaemonRoutesFunc
 	t.Cleanup(func() { setDaemonRoutesFunc = oldSetRoutes })
-	setDaemonRoutesFunc = func([]proxy.Route) error {
+	setDaemonRoutesFunc = func(_ daemonScope, _ []proxy.Route) error {
 		return errors.New("routes failed")
 	}
 	err := registryStore().Update(func(r *registry.Registry) error {
@@ -544,7 +854,7 @@ func TestRmProjectRestoresRegistryAndDNSWhenDNSFails(t *testing.T) {
 		setDaemonRoutesFunc = oldSetRoutes
 		selectDNSProvider = oldSelect
 	})
-	setDaemonRoutesFunc = func([]proxy.Route) error {
+	setDaemonRoutesFunc = func(_ daemonScope, _ []proxy.Route) error {
 		return nil
 	}
 	var ensured []string
@@ -599,7 +909,7 @@ func TestRmProjectReportsRollbackFailureWhenDNSRestoreFails(t *testing.T) {
 		setDaemonRoutesFunc = oldSetRoutes
 		selectDNSProvider = oldSelect
 	})
-	setDaemonRoutesFunc = func([]proxy.Route) error {
+	setDaemonRoutesFunc = func(_ daemonScope, _ []proxy.Route) error {
 		return nil
 	}
 	selectDNSProvider = func(_, _ string) dns.Provider {
@@ -732,9 +1042,6 @@ func TestPortListsStandaloneReservations(t *testing.T) {
 	if !strings.Contains(s, "standalone/web.localhost") {
 		t.Fatalf("standalone owner missing in:\n%s", s)
 	}
-	if strings.Contains(s, "adhoc") {
-		t.Fatalf("port list should not expose adhoc terminology:\n%s", s)
-	}
 
 	out.Reset()
 	if code := Port([]string{"-a", "--json"}, &out, &errb); code != ExitOK {
@@ -802,11 +1109,11 @@ func TestRunUsesStandaloneReservationOutsideProject(t *testing.T) {
 	isolate(t)
 	if err := registryStore().Update(func(r *registry.Registry) error {
 		return r.Reserve(registry.Reservation{
-			Service: "web.localhost",
-			Domain:  "web.localhost",
-			Port:    4312,
-			Adhoc:   true,
-			Active:  true,
+			Service:    "web.localhost",
+			Domain:     "web.localhost",
+			Port:       4312,
+			Standalone: true,
+			Active:     true,
 		})
 	}); err != nil {
 		t.Fatal(err)

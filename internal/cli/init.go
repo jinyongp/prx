@@ -222,7 +222,7 @@ func displayReservationOwner(res registry.Reservation) string {
 		}
 		return res.Project
 	}
-	if res.Adhoc {
+	if res.Standalone {
 		if res.Service != "" {
 			return "standalone/" + res.Service
 		}

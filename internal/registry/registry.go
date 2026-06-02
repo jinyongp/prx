@@ -21,7 +21,7 @@ type Reservation struct {
 	Port       int    `json:"port"`
 	TLS        string `json:"tls,omitempty"`
 	DNS        string `json:"dns,omitempty"`
-	Adhoc      bool   `json:"adhoc,omitempty"`
+	Standalone bool   `json:"standalone,omitempty"`
 	Active     bool   `json:"active,omitempty"`      // true while routed; reservation persists when false
 	ConfigPath string `json:"config_path,omitempty"` // gate.toml that owns this reservation; enables GC
 }

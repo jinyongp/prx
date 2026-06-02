@@ -45,9 +45,11 @@ fi
 | `gate add <domain> <port> [--json]` | reserve a domain→port mapping |
 | `gate rm <domain> [--json]` / `gate rm --project [name] [--json]` | remove a reservation or project reservations |
 | `gate prune [--json]` | GC reservations whose gate.toml is gone |
-| `gate daemon start [--https-addr addr] [--http-addr addr]` | start the resident proxy |
-| `gate daemon stop\|restart\|logs` | stop, restart, or print logs for the resident proxy |
-| `gate daemon status [--json]` | inspect the resident proxy |
+| `gate daemon start [-g\|--global] [-p name\|--project name] [--https-addr addr] [--http-addr addr]` | start one scoped proxy |
+| `gate daemon stop [-g\|--global] [-p name\|--project name] [-a\|--all]` | stop scoped proxy daemon(s) |
+| `gate daemon restart [-g\|--global] [-p name\|--project name] [--https-addr addr] [--http-addr addr]` | restart one scoped proxy |
+| `gate daemon logs [-g\|--global] [-p name\|--project name] [-a\|--all]` | print scoped proxy logs |
+| `gate daemon status [-g\|--global] [-p name\|--project name] [-a\|--all] [--json]` | inspect scoped proxy status |
 | `gate trust` | install the root CA (one time) |
 | `gate ca export [--out path]` | export the root CA for other devices |
 | `gate expose <service> --via <provider> [--auth user:pass] [--json]` | reach a service externally |
@@ -130,7 +132,10 @@ uses `default` when unset or empty.
 Inside a project, `gate add`/`gate rm` edit this file in place, preserving comments.
 Outside a project they create/remove standalone registry reservations. Domains ending
 in `.localhost` need no sudo; custom domains use `/etc/hosts` (sudo).
-Standalone reservations are active routes: if the daemon is running, `add`/`rm`
-hot-reload it; if it is stopped, `gate daemon start` loads active routes from the
-registry. Outside a project, `gate port <domain>` and `gate run <domain> -- ...`
-resolve standalone reservations by domain.
+Project reservations are served by that project's daemon. Standalone
+reservations are served by the global daemon. If the relevant daemon is running,
+`up`/`down`/`add`/`rm` hot-reload only that scope. If it is stopped,
+`gate daemon start` inside a project starts the project daemon; outside a project
+it starts the global daemon. Use `gate daemon status --all` to inspect all known
+daemon scopes. Outside a project, `gate port <domain>` and
+`gate run <domain> -- ...` resolve standalone reservations by domain.

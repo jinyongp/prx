@@ -82,9 +82,17 @@ func TestEnsureCreates0700(t *testing.T) {
 	}
 }
 
-func TestSocketPathUnderConfig(t *testing.T) {
+func TestScopedDaemonPaths(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", "/xdg/cfg")
-	if got, want := SocketPath(), "/xdg/cfg/gate/gate.sock"; got != want {
-		t.Fatalf("SocketPath() = %q, want %q", got, want)
+	t.Setenv("XDG_STATE_HOME", "/xdg/state")
+	scope := "project-demo"
+	if got, want := DaemonSocketPath(scope), "/xdg/cfg/gate/daemons/project-demo.sock"; got != want {
+		t.Fatalf("DaemonSocketPath() = %q, want %q", got, want)
+	}
+	if got, want := DaemonPIDPath(scope), "/xdg/cfg/gate/daemons/project-demo.pid"; got != want {
+		t.Fatalf("DaemonPIDPath() = %q, want %q", got, want)
+	}
+	if got, want := DaemonLogPath(scope), "/xdg/state/gate/daemons/project-demo.log"; got != want {
+		t.Fatalf("DaemonLogPath() = %q, want %q", got, want)
 	}
 }

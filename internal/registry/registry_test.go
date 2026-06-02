@@ -2,6 +2,9 @@ package registry
 
 import (
 	"errors"
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -68,7 +71,7 @@ func TestPrune(t *testing.T) {
 	r := New()
 	_ = r.Reserve(Reservation{Project: "live", Service: "web", Domain: "a", Port: 4300, ConfigPath: "/exists"})
 	_ = r.Reserve(Reservation{Project: "dead", Service: "web", Domain: "b", Port: 4301, ConfigPath: "/gone"})
-	_ = r.Reserve(Reservation{Project: "", Service: "c", Domain: "c", Port: 4302}) // adhoc, no ConfigPath
+	_ = r.Reserve(Reservation{Project: "", Service: "c", Domain: "c", Port: 4302}) // standalone, no ConfigPath
 
 	removed := r.Prune(func(p string) bool { return p == "/exists" })
 	if len(removed) != 1 || removed[0].Project != "dead" {
@@ -81,7 +84,28 @@ func TestPrune(t *testing.T) {
 		t.Fatal("live reservation wrongly pruned")
 	}
 	if _, ok := r.Get("/c"); !ok {
-		t.Fatal("adhoc reservation wrongly pruned")
+		t.Fatal("standalone reservation wrongly pruned")
+	}
+}
+
+func TestStorePersistsStandaloneJSONKey(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "registry.json")
+	store := Open(path)
+	if err := store.Update(func(r *Registry) error {
+		return r.Reserve(Reservation{Service: "web.localhost", Domain: "web.localhost", Port: 4312, Standalone: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(b)
+	if !strings.Contains(s, `"standalone": true`) {
+		t.Fatalf("registry JSON missing standalone key:\n%s", s)
+	}
+	if strings.Contains(s, `"adhoc"`) {
+		t.Fatalf("registry JSON should not contain adhoc key:\n%s", s)
 	}
 }
 
