@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"prx/internal/config"
+	"gate/internal/config"
 )
 
 func TestInitCreatesValidConfig(t *testing.T) {
@@ -20,7 +20,7 @@ func TestInitCreatesValidConfig(t *testing.T) {
 	path := filepath.Join(dir, config.Filename)
 	p, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("generated prx.toml invalid: %v", err)
+		t.Fatalf("generated gate.toml invalid: %v", err)
 	}
 	if p.Name != "demo" {
 		t.Fatalf("project name = %q", p.Name)
@@ -97,7 +97,7 @@ func TestRenderInteractiveCustomDomainSpec(t *testing.T) {
 	}
 	p, err := config.Load(path)
 	if err != nil {
-		t.Fatalf("generated prx.toml invalid: %v\n%s", err, got)
+		t.Fatalf("generated gate.toml invalid: %v\n%s", err, got)
 	}
 	if p.Services["web"].Domain != "local.project.test" {
 		t.Fatalf("web domain = %q", p.Services["web"].Domain)

@@ -1,7 +1,7 @@
-// Package ui holds prx's presentation-tier styling: the lipgloss palette and
+// Package ui holds gate's presentation-tier styling: the lipgloss palette and
 // shared render helpers. It is TTY-only sugar — callers gate on Enabled so that
 // piped, --json, and NO_COLOR output stays plain. ui imports lipgloss only (no
-// prx packages) so it stays free of import cycles and the core stays TUI-free.
+// gate packages) so it stays free of import cycles and the core stays TUI-free.
 package ui
 
 import (
@@ -56,7 +56,7 @@ func Enabled(w io.Writer) bool {
 }
 
 // Command renders a fixed-width, left-aligned command name in the brand color,
-// used by `prx` usage output.
+// used by `gate` usage output.
 func Command(name string, width int) string {
 	return lipgloss.NewStyle().Foreground(Brand).Width(width).Render(name)
 }

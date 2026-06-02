@@ -23,7 +23,7 @@ type AccessEntry struct {
 }
 
 // AccessLog wraps next, writing one JSONL line per request to w. It is opt-in
-// (prx enables it only with --access-log) to avoid dev-time noise.
+// (gate enables it only with --access-log) to avoid dev-time noise.
 func AccessLog(next http.Handler, w io.Writer) http.Handler {
 	var mu sync.Mutex
 	enc := json.NewEncoder(w)

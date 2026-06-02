@@ -7,7 +7,7 @@ import (
 	"os"
 	"path/filepath"
 
-	"prx/internal/fsutil"
+	"gate/internal/fsutil"
 
 	"golang.org/x/sys/unix"
 )

@@ -1,4 +1,4 @@
-// Package logx builds prx's loggers on top of stdlib log/slog: a human handler
+// Package logx builds gate's loggers on top of stdlib log/slog: a human handler
 // (coloured on a TTY, plain logfmt otherwise) and the stdlib JSON handler for
 // JSONL output. It also provides access logging and size-based rotation.
 package logx

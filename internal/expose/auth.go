@@ -17,7 +17,7 @@ func BasicAuth(next http.Handler, userpass string) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, pass, ok := r.BasicAuth()
 		if !ok || !constEqual(user, wantUser) || !constEqual(pass, wantPass) {
-			w.Header().Set("WWW-Authenticate", `Basic realm="prx"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="gate"`)
 			http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
 			return
 		}

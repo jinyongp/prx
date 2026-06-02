@@ -9,12 +9,12 @@ import (
 	"strings"
 	"testing"
 
-	"prx/internal/dns"
-	"prx/internal/proxy"
-	"prx/internal/registry"
+	"gate/internal/dns"
+	"gate/internal/proxy"
+	"gate/internal/registry"
 )
 
-// isolate points prx's config dir at a temp dir for the duration of the test.
+// isolate points gate's config dir at a temp dir for the duration of the test.
 func isolate(t *testing.T) {
 	t.Helper()
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
@@ -234,7 +234,7 @@ func TestAddRmSyncProjectConfig(t *testing.T) {
 	isolate(t)
 	dir := t.TempDir()
 	body := "# keep\n[project]\nname = \"demo\"\n"
-	path := filepath.Join(dir, "prx.toml")
+	path := filepath.Join(dir, "gate.toml")
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
 	}
@@ -289,7 +289,7 @@ func TestLsDefaultsToCurrentProjectActiveReservations(t *testing.T) {
 	isolate(t)
 	dir := t.TempDir()
 	toml := "[project]\nname = \"demo\"\n\n[services.web]\ndomain = \"app.localhost\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "prx.toml"), []byte(toml), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "gate.toml"), []byte(toml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
@@ -363,7 +363,7 @@ func TestRmProjectRemovesCurrentProjectReservations(t *testing.T) {
 	isolate(t)
 	dir := t.TempDir()
 	toml := "[project]\nname = \"demo\"\n\n[services.web]\ndomain = \"app.localhost\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "prx.toml"), []byte(toml), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "gate.toml"), []byte(toml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
@@ -614,7 +614,7 @@ func setupProject(t *testing.T) {
 	isolate(t)
 	dir := t.TempDir()
 	toml := "[project]\nname = \"demo\"\n\n[services.web]\ndomain = \"app.localhost\"\n"
-	if err := os.WriteFile(filepath.Join(dir, "prx.toml"), []byte(toml), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "gate.toml"), []byte(toml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)

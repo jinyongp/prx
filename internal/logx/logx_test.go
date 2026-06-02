@@ -79,7 +79,7 @@ func TestAccessLog(t *testing.T) {
 }
 
 func TestRotatingFileRotates(t *testing.T) {
-	path := filepath.Join(t.TempDir(), "prx.log")
+	path := filepath.Join(t.TempDir(), "gate.log")
 	rf, err := NewRotatingFile(path, 10, 2)
 	if err != nil {
 		t.Fatal(err)

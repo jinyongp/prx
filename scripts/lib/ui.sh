@@ -1,6 +1,6 @@
 #!/usr/bin/env sh
 
-case "${PRX_COLOR:-auto}" in
+case "${GATE_COLOR:-auto}" in
   always)
     UI_COLOR=1
     ;;

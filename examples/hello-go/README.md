@@ -1,8 +1,8 @@
 # hello-go
 
-Tiny HTTP server for testing prx locally.
+Tiny HTTP server for testing gate locally.
 
-## Run Through Development prx
+## Run Through Development gate
 
 From the repository root:
 
@@ -18,12 +18,12 @@ https://hello-go.localhost
 
 Use `Ctrl-C` to stop the sample server.
 
-The first browser visit may show `ERR_CERT_AUTHORITY_INVALID`. That means the local prx CA is not trusted yet. For smoke testing, use the browser's advanced/proceed flow.
+The first browser visit may show `ERR_CERT_AUTHORITY_INVALID`. That means the local gate CA is not trusted yet. For smoke testing, use the browser's advanced/proceed flow.
 
 To remove the warning:
 
 ```bash
-bin/prx trust
+bin/gate trust
 ```
 
 Run it from the repository root. It may ask for administrator approval.

@@ -18,7 +18,7 @@ func TestSkillPathMaterialises(t *testing.T) {
 	if err != nil {
 		t.Fatalf("materialised file missing: %v", err)
 	}
-	if !strings.Contains(string(b), "name: prx") {
+	if !strings.Contains(string(b), "name: gate") {
 		t.Fatalf("SKILL.md missing frontmatter:\n%s", b)
 	}
 }
@@ -29,7 +29,7 @@ func TestSkillPrint(t *testing.T) {
 	if code := Skill([]string{"print"}, &out, &errb); code != ExitOK {
 		t.Fatalf("skill print exit = %d", code)
 	}
-	if !strings.Contains(out.String(), "# prx") {
+	if !strings.Contains(out.String(), "# gate") {
 		t.Fatalf("print output missing content")
 	}
 }

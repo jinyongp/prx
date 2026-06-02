@@ -2,16 +2,17 @@ package daemon
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"testing"
 	"time"
 
-	"prx/internal/proxy"
+	"gate/internal/proxy"
 )
 
 func TestAdminStatusAndRoutes(t *testing.T) {
 	srv := proxy.New(nil, nil)
-	socket := filepath.Join(t.TempDir(), "prx.sock")
+	socket := testSocketPath(t)
 	stop, err := ServeAdmin(context.Background(), socket, srv)
 	if err != nil {
 		t.Fatalf("ServeAdmin: %v", err)
@@ -49,7 +50,7 @@ func TestAdminStatusAndRoutes(t *testing.T) {
 
 func TestServeAdminRefusesLiveSocket(t *testing.T) {
 	srv := proxy.New(nil, nil)
-	socket := filepath.Join(t.TempDir(), "prx.sock")
+	socket := testSocketPath(t)
 	stop, err := ServeAdmin(context.Background(), socket, srv)
 	if err != nil {
 		t.Fatalf("ServeAdmin: %v", err)
@@ -73,4 +74,14 @@ func TestClientNotRunning(t *testing.T) {
 	if c.IsRunning() {
 		t.Fatal("IsRunning = true for missing socket")
 	}
+}
+
+func testSocketPath(t *testing.T) string {
+	t.Helper()
+	dir, err := os.MkdirTemp("/tmp", "gate-daemon-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(dir) })
+	return filepath.Join(dir, "gate.sock")
 }

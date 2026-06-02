@@ -1,4 +1,4 @@
-// Package paths resolves prx's on-disk locations. Configuration and data
+// Package paths resolves gate's on-disk locations. Configuration and data
 // follow the XDG Base Directory spec on every platform; logs/state follow XDG
 // on Linux and the Apple convention (~/Library/Logs) on macOS.
 package paths
@@ -10,16 +10,16 @@ import (
 )
 
 // appName is the per-tool subdirectory created under every base directory.
-const appName = "prx"
+const appName = "gate"
 
 // ConfigDir returns the directory for configuration and the global registry
-// (default ~/.config/prx).
+// (default ~/.config/gate).
 func ConfigDir() string {
 	return base("XDG_CONFIG_HOME", ".config")
 }
 
 // DataDir returns the directory for the CA, certificates and ACME state
-// (default ~/.local/share/prx).
+// (default ~/.local/share/gate).
 func DataDir() string {
 	return base("XDG_DATA_HOME", filepath.Join(".local", "share"))
 }
@@ -36,7 +36,7 @@ func RuntimeDir() string {
 
 // SocketPath returns the path of the daemon admin control socket.
 func SocketPath() string {
-	return filepath.Join(RuntimeDir(), "prx.sock")
+	return filepath.Join(RuntimeDir(), "gate.sock")
 }
 
 // Ensure creates dir (mode 0700) if it does not exist and returns it.

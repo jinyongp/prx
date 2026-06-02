@@ -1,4 +1,4 @@
-// Package daemon runs the resident prx proxy and its control plane. The control
+// Package daemon runs the resident gate proxy and its control plane. The control
 // plane is a small HTTP API over a unix-domain socket; the CLI uses it to push
 // routes (hot reload) and query status. Only one process owns the proxy listen
 // ports at a time.
@@ -10,7 +10,7 @@ import (
 	"os"
 	"time"
 
-	"prx/internal/proxy"
+	"gate/internal/proxy"
 )
 
 // Status is the daemon's reported state.

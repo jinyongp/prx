@@ -1,4 +1,4 @@
-// Command prx is a local-development global HTTPS reverse proxy and port
+// Command gate is a local-development global HTTPS reverse proxy and port
 // registry, shipped as a single Go binary.
 package main
 
@@ -10,8 +10,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"prx/internal/cli"
-	"prx/internal/ui"
+	"gate/internal/cli"
+	"gate/internal/ui"
 
 	"github.com/spf13/cobra"
 )
@@ -24,13 +24,13 @@ func main() {
 	os.Exit(run(os.Args[1:], os.Stdout, os.Stderr))
 }
 
-// command implements a single prx subcommand and returns a process exit code.
+// command implements a single gate subcommand and returns a process exit code.
 type command func(args []string, stdout, stderr io.Writer) int
 
 type exitCodeError struct{ code int }
 
 func (e exitCodeError) Error() string {
-	return fmt.Sprintf("prx: command exited with code %d", e.code)
+	return fmt.Sprintf("gate: command exited with code %d", e.code)
 }
 
 // commands is the subcommand dispatch table. Subcommands register here as
@@ -56,7 +56,7 @@ var commands = map[string]command{
 
 func run(args []string, stdout, stderr io.Writer) int {
 	root := &cobra.Command{
-		Use:           "prx",
+		Use:           "gate",
 		Short:         "local-dev HTTPS reverse proxy + port registry",
 		SilenceUsage:  true,
 		SilenceErrors: true,
@@ -66,7 +66,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 				usage(cmd.OutOrStdout())
 				return nil
 			}
-			fmt.Fprintf(cmd.ErrOrStderr(), "prx: unknown command %q\n", cmdArgs[0])
+			fmt.Fprintf(cmd.ErrOrStderr(), "gate: unknown command %q\n", cmdArgs[0])
 			usage(cmd.ErrOrStderr())
 			return exitCodeError{code: 2}
 		},
@@ -78,7 +78,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 	root.SetVersionTemplate("{{.Version}}\n")
 	// Override help for the root only; subcommands (e.g. the built-in
 	// completion command) keep cobra's default help so their own argument
-	// usage is shown instead of prx's top-level usage.
+	// usage is shown instead of gate's top-level usage.
 	defaultHelp := root.HelpFunc()
 	root.SetHelpFunc(func(cmd *cobra.Command, args []string) {
 		if cmd == root {
@@ -116,7 +116,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		root.AddCommand(sub)
 	}
 
-	// prx targets Unix only, so drop powershell from the generated completion
+	// gate targets Unix only, so drop powershell from the generated completion
 	// command to avoid advertising an unsupported shell. Render its help in the
 	// same style as every other subcommand so the whole CLI surface is uniform.
 	root.InitDefaultCompletionCmd()
@@ -170,10 +170,10 @@ func usage(w io.Writer) {
 		usageRich(w)
 		return
 	}
-	fmt.Fprint(w, `prx — local-dev HTTPS reverse proxy + port registry
+	fmt.Fprint(w, `gate — local-dev HTTPS reverse proxy + port registry
 
 usage:
-  prx [--version] <command> [args]
+  gate [--version] <command> [args]
 
 commands:
 `)
@@ -182,9 +182,9 @@ commands:
 		fmt.Fprintf(tw, "  %s\t%s\n", c.Name, c.Summary)
 	}
 	if err := tw.Flush(); err != nil {
-		fmt.Fprintln(w, "prx: failed to render usage table", err)
+		fmt.Fprintln(w, "gate: failed to render usage table", err)
 	}
-	fmt.Fprint(w, "\nRun 'prx <command> -h' for command-specific flags.\n")
+	fmt.Fprint(w, "\nRun 'gate <command> -h' for command-specific flags.\n")
 }
 
 // commandGroups arranges commands into labelled sections for the rich usage
@@ -213,8 +213,8 @@ func usageRich(w io.Writer) {
 		}
 	}
 
-	fmt.Fprintln(w, ui.Title("prx", "local-dev HTTPS reverse proxy + port registry"))
-	fmt.Fprintf(w, "\n%s\n  prx [--version] <command> [args]\n", ui.Section("USAGE"))
+	fmt.Fprintln(w, ui.Title("gate", "local-dev HTTPS reverse proxy + port registry"))
+	fmt.Fprintf(w, "\n%s\n  gate [--version] <command> [args]\n", ui.Section("USAGE"))
 
 	grouped := map[string]bool{}
 	for _, g := range commandGroups {
@@ -238,5 +238,5 @@ func usageRich(w io.Writer) {
 		}
 	}
 
-	fmt.Fprintf(w, "\n%s\n", ui.Dim.Render("Run 'prx <command> -h' for command-specific flags."))
+	fmt.Fprintf(w, "\n%s\n", ui.Dim.Render("Run 'gate <command> -h' for command-specific flags."))
 }

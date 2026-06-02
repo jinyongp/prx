@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"prx/internal/fsutil"
+	"gate/internal/fsutil"
 )
 
 // ErrServiceExists is returned by AddService when the service is already present.
@@ -14,7 +14,7 @@ var ErrServiceExists = fmt.Errorf("service already exists")
 
 var serviceNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 
-// AddService appends a [services.<name>] block to the prx.toml at path while
+// AddService appends a [services.<name>] block to the gate.toml at path while
 // preserving every existing line and comment. The file is created (with a
 // minimal header) if it does not exist. It never rewrites the whole document,
 // so hand-written comments survive.
@@ -35,7 +35,7 @@ func AddService(path, name string, svc Service) error {
 			return fmt.Errorf("%q: %w", name, ErrServiceExists)
 		}
 	case os.IsNotExist(err):
-		lines = []string{"# managed by prx"}
+		lines = []string{"# managed by gate"}
 	default:
 		return err
 	}
@@ -49,7 +49,7 @@ func AddService(path, name string, svc Service) error {
 	return writeLines(path, lines)
 }
 
-// RemoveService removes the [services.<name>] table from prx.toml, leaving all
+// RemoveService removes the [services.<name>] table from gate.toml, leaving all
 // other content untouched. It is a no-op (returns nil) if the service is absent.
 func RemoveService(path, name string) error {
 	if !serviceNameRe.MatchString(name) {

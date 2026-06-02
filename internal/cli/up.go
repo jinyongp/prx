@@ -10,13 +10,13 @@ import (
 	"sort"
 	"strings"
 
-	"prx/internal/config"
-	"prx/internal/daemon"
-	"prx/internal/dns"
-	"prx/internal/paths"
-	"prx/internal/port"
-	"prx/internal/proxy"
-	"prx/internal/registry"
+	"gate/internal/config"
+	"gate/internal/daemon"
+	"gate/internal/dns"
+	"gate/internal/paths"
+	"gate/internal/port"
+	"gate/internal/proxy"
+	"gate/internal/registry"
 )
 
 type upResult struct {
@@ -91,7 +91,7 @@ func Up(args []string, stdout, stderr io.Writer) int {
 	if *startDaemon {
 		if st, err := client.Status(); err == nil {
 			if !daemonListenMatches(st, *httpsAddr, *httpAddr) {
-				msg := fmt.Sprintf("daemon already running on https %s · http %s; requested https %s · http %s; run `prx daemon stop` first",
+				msg := fmt.Sprintf("daemon already running on https %s · http %s; requested https %s · http %s; run `gate daemon stop` first",
 					displayListenAddr(st.HTTPSAddr), displayListenAddr(st.HTTPAddr), *httpsAddr, *httpAddr)
 				return fail(stderr, *jsonOut, ExitConflict, "daemon_start", msg)
 			}
@@ -125,7 +125,7 @@ func Up(args []string, stdout, stderr io.Writer) int {
 	if reloaded {
 		fmt.Fprintf(stdout, "proxy reloaded · %d routes active\n", len(routes))
 	} else {
-		fmt.Fprintln(stderr, "note: no daemon running; start it with `prx daemon start`")
+		fmt.Fprintln(stderr, "note: no daemon running; start it with `gate daemon start`")
 	}
 	return ExitOK
 }

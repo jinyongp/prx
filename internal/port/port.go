@@ -1,6 +1,6 @@
 // Package port allocates and probes local development ports. Allocation is
 // best-effort: it avoids both registry-reserved ports and ports the OS reports
-// as currently bound, but reservations are a prx-internal promise, not an OS
+// as currently bound, but reservations are a gate-internal promise, not an OS
 // lock.
 package port
 
@@ -53,7 +53,7 @@ func IsBound(p int) bool {
 	return false
 }
 
-// IsLive reports whether a backend is accepting connections on the port. prx
+// IsLive reports whether a backend is accepting connections on the port. gate
 // cannot observe the dev-server process, so liveness is determined by dialling.
 func IsLive(p int) bool {
 	conn, err := net.DialTimeout("tcp", addr(p), liveTimeout)

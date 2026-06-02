@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"time"
 
-	"prx/internal/proxy"
+	"gate/internal/proxy"
 )
 
 // Daemon binds the control socket and the proxy planes together.

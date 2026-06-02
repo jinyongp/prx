@@ -23,7 +23,7 @@ type Reservation struct {
 	DNS        string `json:"dns,omitempty"`
 	Adhoc      bool   `json:"adhoc,omitempty"`
 	Active     bool   `json:"active,omitempty"`      // true while routed; reservation persists when false
-	ConfigPath string `json:"config_path,omitempty"` // prx.toml that owns this reservation; enables GC
+	ConfigPath string `json:"config_path,omitempty"` // gate.toml that owns this reservation; enables GC
 }
 
 // Registry is the whole on-disk document.
@@ -106,7 +106,7 @@ func canonicalDomain(domain string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
 }
 
-// Prune removes reservations whose owning prx.toml no longer exists (per the
+// Prune removes reservations whose owning gate.toml no longer exists (per the
 // exists predicate) and returns the removed reservations sorted by key.
 func (r *Registry) Prune(exists func(path string) bool) []Reservation {
 	var removed []Reservation

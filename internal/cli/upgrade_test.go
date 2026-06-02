@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"prx/internal/daemon"
+	"gate/internal/daemon"
 )
 
 func TestCompleteUpgradeRestartsRunningDaemon(t *testing.T) {

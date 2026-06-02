@@ -1,8 +1,8 @@
 # hello-js
 
-Tiny Node.js HTTP server for testing prx locally.
+Tiny Node.js HTTP server for testing gate locally.
 
-## Run Through Development prx
+## Run Through Development gate
 
 From the repository root:
 
@@ -18,12 +18,12 @@ https://hello-js.localhost
 
 Use `Ctrl-C` to stop the sample server.
 
-The first browser visit may show `ERR_CERT_AUTHORITY_INVALID`. That means the local prx CA is not trusted yet. For smoke testing, use the browser's advanced/proceed flow.
+The first browser visit may show `ERR_CERT_AUTHORITY_INVALID`. That means the local gate CA is not trusted yet. For smoke testing, use the browser's advanced/proceed flow.
 
 To remove the warning:
 
 ```bash
-bin/prx trust
+bin/gate trust
 ```
 
 Run it from the repository root. It may ask for administrator approval.
@@ -40,7 +40,7 @@ name = "hello-js"
 domain = "hello-js.localhost"
 ```
 
-File: `localhost/prx.toml`
+File: `localhost/gate.toml`
 
 Custom-domain config:
 
@@ -52,7 +52,7 @@ name = "hello-js-custom"
 domain = "hello-js.test"
 ```
 
-File: `custom-domain/prx.toml`
+File: `custom-domain/gate.toml`
 
 Run custom-domain smoke from the repository root:
 
@@ -66,7 +66,7 @@ Then open:
 https://hello-js.test
 ```
 
-Custom domains are not automatic like `.localhost`; they need `/etc/hosts` or local DNS setup. `just hello-js-custom` uses HTTPS `:443` and HTTP `:80`; if another process owns those ports, stop it first. The recipe adds `hello-js.test` to `/etc/hosts` inside a dedicated `<prx:hello-js-custom-hosts>` block, so sudo may ask for your password once. Remove it with `just hello-js-custom-clean`. TLS still needs `bin/prx trust` or browser advanced/proceed.
+Custom domains are not automatic like `.localhost`; they need `/etc/hosts` or local DNS setup. `just hello-js-custom` uses HTTPS `:443` and HTTP `:80`; if another process owns those ports, stop it first. The recipe adds `hello-js.test` to `/etc/hosts` inside a dedicated `<gate:hello-js-custom-hosts>` block, so sudo may ask for your password once. Remove it with `just hello-js-custom-clean`. TLS still needs `bin/gate trust` or browser advanced/proceed.
 
 ## Direct Run
 

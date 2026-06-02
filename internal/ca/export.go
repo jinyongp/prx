@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"prx/internal/fsutil"
+	"gate/internal/fsutil"
 )
 
 // Fingerprint returns the SHA-256 fingerprint of the root certificate as an

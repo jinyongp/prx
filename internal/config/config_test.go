@@ -79,12 +79,12 @@ func TestLoadExpandsServiceEnvFromEnvFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, Filename)
 	writeFile(t, filepath.Join(dir, ".env.local"), `
-PRX_BASE_DOMAIN=local.stamp.is
-PRX_WEB_PORT=4306
+GATE_BASE_DOMAIN=local.stamp.is
+GATE_WEB_PORT=4306
 `)
 	writeFile(t, filepath.Join(dir, ".env"), `
-PRX_BASE_DOMAIN=wrong.example
-PRX_WEB_PORT=4999
+GATE_BASE_DOMAIN=wrong.example
+GATE_WEB_PORT=4999
 `)
 	writeFile(t, path, `
 [project]
@@ -92,8 +92,8 @@ name = "myapp"
 env_files = [".env.local", ".env"]
 
 [services.web]
-domain = "web.${PRX_BASE_DOMAIN}"
-port = "${PRX_WEB_PORT}"
+domain = "web.${GATE_BASE_DOMAIN}"
+port = "${GATE_WEB_PORT}"
 `)
 
 	p, err := Load(path)
@@ -112,8 +112,8 @@ port = "${PRX_WEB_PORT}"
 func TestLoadProcessEnvOverridesEnvFiles(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, Filename)
-	t.Setenv("PRX_WEB_PORT", "5555")
-	writeFile(t, filepath.Join(dir, ".env"), "PRX_WEB_PORT=4306\n")
+	t.Setenv("GATE_WEB_PORT", "5555")
+	writeFile(t, filepath.Join(dir, ".env"), "GATE_WEB_PORT=4306\n")
 	writeFile(t, path, `
 [project]
 name = "myapp"
@@ -121,7 +121,7 @@ env_files = [".env"]
 
 [services.web]
 domain = "web.localhost"
-port = "${PRX_WEB_PORT}"
+port = "${GATE_WEB_PORT}"
 `)
 
 	p, err := Load(path)
@@ -141,8 +141,8 @@ func TestLoadEnvReferenceDefault(t *testing.T) {
 name = "myapp"
 
 [services.web]
-domain = "${PRX_WEB_DOMAIN:-web.localhost}"
-port = "${PRX_WEB_PORT:-4306}"
+domain = "${GATE_WEB_DOMAIN:-web.localhost}"
+port = "${GATE_WEB_PORT:-4306}"
 `)
 
 	p, err := Load(path)
@@ -165,7 +165,7 @@ func TestLoadMissingEnvReferenceFails(t *testing.T) {
 name = "myapp"
 
 [services.web]
-domain = "${PRX_WEB_DOMAIN}"
+domain = "${GATE_WEB_DOMAIN}"
 `)
 
 	if _, err := Load(path); err == nil {
@@ -176,14 +176,14 @@ domain = "${PRX_WEB_DOMAIN}"
 func TestLoadMissingEnvFileUsesProcessEnv(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, Filename)
-	t.Setenv("PRX_WEB_DOMAIN", "web.localhost")
+	t.Setenv("GATE_WEB_DOMAIN", "web.localhost")
 	writeFile(t, path, `
 [project]
 name = "myapp"
 env_files = [".env.missing"]
 
 [services.web]
-domain = "${PRX_WEB_DOMAIN}"
+domain = "${GATE_WEB_DOMAIN}"
 `)
 
 	p, err := Load(path)
@@ -215,7 +215,7 @@ func TestDiscoverWalksUp(t *testing.T) {
 
 func TestDiscoverStopsAtGitRoot(t *testing.T) {
 	root := t.TempDir()
-	// prx.toml above the git root must NOT be found.
+	// gate.toml above the git root must NOT be found.
 	writeFile(t, filepath.Join(root, Filename), "[project]\n")
 	gitRoot := filepath.Join(root, "repo")
 	start := filepath.Join(gitRoot, "sub")

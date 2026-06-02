@@ -16,13 +16,13 @@ import (
 	"syscall"
 	"time"
 
-	"prx/internal/ca"
-	"prx/internal/daemon"
-	"prx/internal/paths"
-	"prx/internal/proxy"
+	"gate/internal/ca"
+	"gate/internal/daemon"
+	"gate/internal/paths"
+	"gate/internal/proxy"
 )
 
-func pidPath() string { return filepath.Join(paths.ConfigDir(), "prx.pid") }
+func pidPath() string { return filepath.Join(paths.ConfigDir(), "gate.pid") }
 
 var newDaemonServeCommand = func(exe, httpsAddr, httpAddr string) *exec.Cmd {
 	//nolint:gosec // G204: exe is our own binary path; listen addrs are passed as argv, not a shell.
@@ -34,7 +34,7 @@ const (
 	defaultDaemonHTTPAddr  = ":80"
 )
 
-// Daemon dispatches `prx daemon start|stop|restart|status|logs`.
+// Daemon dispatches `gate daemon start|stop|restart|status|logs`.
 func Daemon(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
 		sp := specFor("daemon")
@@ -100,7 +100,7 @@ func daemonStart(args []string, stdout, stderr io.Writer) int {
 	client := daemon.NewClient(paths.SocketPath())
 	if st, err := client.Status(); err == nil {
 		if !daemonListenMatches(st, *httpsAddr, *httpAddr) {
-			msg := fmt.Sprintf("daemon already running on https %s · http %s; requested https %s · http %s; run `prx daemon stop` first",
+			msg := fmt.Sprintf("daemon already running on https %s · http %s; requested https %s · http %s; run `gate daemon stop` first",
 				displayListenAddr(st.HTTPSAddr), displayListenAddr(st.HTTPAddr), *httpsAddr, *httpAddr)
 			return fail(stderr, false, ExitConflict, "start", msg)
 		}
@@ -267,7 +267,7 @@ func openDaemonLog() (*os.File, int64, error) {
 }
 
 func daemonLogPath() string {
-	return filepath.Join(paths.StateDir(), "prx.log")
+	return filepath.Join(paths.StateDir(), "gate.log")
 }
 
 func daemonLogSince(offset int64) string {
@@ -305,7 +305,7 @@ func daemonStop(stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, false, ExitError, "pidfile", "corrupt pid file")
 	}
-	if !isPrxDaemonPID(pid) {
+	if !isGateDaemonPID(pid) {
 		_ = os.Remove(pidPath())
 		fmt.Fprintln(stdout, "not running")
 		return ExitOK
@@ -348,7 +348,7 @@ func waitForDaemonStop(client *daemon.Client, timeout time.Duration) bool {
 
 func daemonStartErrorMessage(waitErr error, childStderr string) string {
 	msg := strings.TrimSpace(childStderr)
-	msg = strings.TrimPrefix(msg, "prx: ")
+	msg = strings.TrimPrefix(msg, "gate: ")
 	if msg != "" {
 		return msg
 	}
@@ -365,14 +365,14 @@ func daemonStartExitCode(msg string) int {
 	return ExitError
 }
 
-func isPrxDaemonPID(pid int) bool {
+func isGateDaemonPID(pid int) bool {
 	//nolint:gosec // G204: fixed executable and fixed flags; pid is data, not a shell command.
 	out, err := exec.Command("ps", "-p", strconv.Itoa(pid), "-o", "args=").Output()
 	if err != nil {
 		return false
 	}
 	args := strings.TrimSpace(string(out))
-	return args == "prx __serve" || strings.HasSuffix(args, "/prx __serve") || strings.Contains(args, " prx __serve")
+	return args == "gate __serve" || strings.HasSuffix(args, "/gate __serve") || strings.Contains(args, " gate __serve")
 }
 
 func daemonLogs(stdout, stderr io.Writer) int {
@@ -386,7 +386,7 @@ func daemonLogs(stdout, stderr io.Writer) int {
 }
 
 // Serve is the hidden `__serve` entrypoint: it runs the resident proxy and the
-// control socket in the foreground until signalled. `prx daemon start` spawns it.
+// control socket in the foreground until signalled. `gate daemon start` spawns it.
 func Serve(args []string, _, stderr io.Writer) int {
 	httpsAddr, httpAddr, code := parseServeFlags(args, stderr)
 	if code != ExitOK {

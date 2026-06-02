@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
 set -eu
 
-VERSION="${PRX_VERSION:-latest}"
-REPO="jinyongp/prx"
+VERSION="${GATE_VERSION:-latest}"
+REPO="jinyongp/gate"
 
 SCRIPT_DIR="$(CDPATH="" cd "$(dirname "$0")" 2>/dev/null && pwd || pwd)"
 if [ -r "${SCRIPT_DIR}/lib/ui.sh" ]; then
@@ -50,7 +50,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-BINARY_NAME="prx-${OS}-${ARCH}"
+BINARY_NAME="gate-${OS}-${ARCH}"
 BINARY_PATH="${TMP_DIR}/${BINARY_NAME}"
 DOWNLOAD_URL=""
 CHECKSUMS_URL=""
@@ -63,7 +63,7 @@ resolve_download_url() {
   fi
 
   RELEASE_JSON="${TMP_DIR}/release.json"
-  if ! curl -fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: prx-install" "$API_URL" > "$RELEASE_JSON"; then
+  if ! curl -fsSL -H "Accept: application/vnd.github+json" -H "User-Agent: gate-install" "$API_URL" > "$RELEASE_JSON"; then
     ui_error "failed to read release metadata from GitHub."
     return 1
   fi
@@ -124,8 +124,8 @@ build_from_source() {
     build_version="$(cd "$SOURCE_DIR" && git describe --tags --always 2>/dev/null || echo dev)"
   fi
 
-  if ! (cd "$SOURCE_DIR" && go build -trimpath -ldflags "-s -w -X main.version=${build_version}" -o "$BINARY_PATH" ./cmd/prx); then
-    ui_error "failed to build prx from source."
+  if ! (cd "$SOURCE_DIR" && go build -trimpath -ldflags "-s -w -X main.version=${build_version}" -o "$BINARY_PATH" ./cmd/gate); then
+    ui_error "failed to build gate from source."
     return 1
   fi
 
@@ -187,12 +187,12 @@ if [ ! -f "$BINARY_PATH" ]; then
 fi
 chmod +x "$BINARY_PATH"
 
-if [ -n "${PRX_BIN_DIR:-}" ]; then
-  if ! mkdir -p "${PRX_BIN_DIR}" 2>/dev/null || [ ! -w "${PRX_BIN_DIR}" ]; then
-    ui_error "PRX_BIN_DIR is set but not writable: ${PRX_BIN_DIR}"
+if [ -n "${GATE_BIN_DIR:-}" ]; then
+  if ! mkdir -p "${GATE_BIN_DIR}" 2>/dev/null || [ ! -w "${GATE_BIN_DIR}" ]; then
+    ui_error "GATE_BIN_DIR is set but not writable: ${GATE_BIN_DIR}"
     exit 1
   fi
-  DEST_DIR="${PRX_BIN_DIR}"
+  DEST_DIR="${GATE_BIN_DIR}"
 elif [ -w "$HOME/.local/bin" ] || mkdir -p "$HOME/.local/bin"; then
   DEST_DIR="$HOME/.local/bin"
 else
@@ -201,7 +201,7 @@ else
   exit 1
 fi
 
-DEST="${DEST_DIR}/prx"
+DEST="${DEST_DIR}/gate"
 
 if command -v install >/dev/null 2>&1; then
   install -m 755 "$BINARY_PATH" "$DEST"
@@ -215,18 +215,18 @@ ui_kv "Binary" "$DEST"
 
 case ":${PATH}:" in
   *":${DEST_DIR}:"*)
-    ui_ok "prx is already in your current PATH."
+    ui_ok "gate is already in your current PATH."
     ;;
   *)
     ui_warn_err "PATH does not currently include ${DEST_DIR}."
-    echo "Run one of the following in your shell to use prx:"
+    echo "Run one of the following in your shell to use gate:"
     echo "  export PATH=\"${DEST_DIR}:\$PATH\""
     ;;
 esac
 
-resolved="$(command -v prx 2>/dev/null || true)"
+resolved="$(command -v gate 2>/dev/null || true)"
 if [ -n "$resolved" ] && [ "$resolved" != "$DEST" ]; then
-  ui_warn_err "another prx is earlier in PATH and will shadow this install:"
+  ui_warn_err "another gate is earlier in PATH and will shadow this install:"
   echo "  ${resolved}"
   echo "Remove it, or reorder PATH so ${DEST_DIR} comes first."
 fi

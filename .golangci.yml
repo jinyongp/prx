@@ -19,7 +19,7 @@ linters:
     - revive
     - unparam
     - nolintlint
-    - gosec # prx security surface: os/exec, file perms 0600, /etc/hosts, sudo
+    - gosec # gate security surface: os/exec, file perms 0600, /etc/hosts, sudo
 
   settings:
     errcheck:
@@ -33,7 +33,7 @@ linters:
         - fmt.Fprintln
         - (io.Writer).Write
     gosec:
-      # G304: prx legitimately reads files by user-provided paths (config,
+      # G304: gate legitimately reads files by user-provided paths (config,
       # registry, certs). Keep the file/dir permission checks (G301/G302/G306).
       # G705/G710: taint-analysis rules that false-positive on a reverse proxy
       # (echoing the Host header, redirecting http→https on the same host).
@@ -55,7 +55,7 @@ linters:
         - name: indent-error-flow
         - name: var-declaration
 
-  # Vendored upstream code is not held to prx's lint rules.
+  # Vendored upstream code is not held to gate's lint rules.
   exclusions:
     paths:
       - internal/truststore

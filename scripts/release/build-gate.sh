@@ -12,12 +12,12 @@ mkdir -p "$OUT_DIR"
 
 for target_os in $GOOS_LIST; do
   for target_arch in $GOARCH_LIST; do
-    out="${OUT_DIR}/prx-${target_os}-${target_arch}"
+    out="${OUT_DIR}/gate-${target_os}-${target_arch}"
     GOOS="$target_os" GOARCH="$target_arch" go build \
       -trimpath \
       -ldflags "$LD_FLAGS" \
       -o "$out" \
-      ./cmd/prx
+      ./cmd/gate
     echo "built $out"
   done
 done

@@ -12,7 +12,7 @@ const server = http.createServer((req, res) => {
 
   res.writeHead(200, { "content-type": "text/plain; charset=utf-8" });
   res.end(
-    `hello from prx js sample\nhost: ${req.headers.host ?? ""}\ntime: ${new Date().toISOString()}\n`,
+    `hello from gate js sample\nhost: ${req.headers.host ?? ""}\ntime: ${new Date().toISOString()}\n`,
   );
 });
 

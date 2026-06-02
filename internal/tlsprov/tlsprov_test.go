@@ -18,7 +18,7 @@ import (
 	"testing"
 	"time"
 
-	"prx/internal/ca"
+	"gate/internal/ca"
 )
 
 func TestInternalProvider(t *testing.T) {

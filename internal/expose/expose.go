@@ -61,7 +61,7 @@ func (Local) Close() error { return nil }
 type LAN struct{}
 
 // Expose validates the mDNS constraint and returns the LAN URL. Other devices
-// must install the prx root CA (prx ca export) to trust it.
+// must install the gate root CA (gate ca export) to trust it.
 func (LAN) Expose(_ context.Context, domain string, _ Opts) (string, error) {
 	if !strings.HasSuffix(domain, ".local") {
 		return "", fmt.Errorf("expose: lan requires a .local domain, got %q", domain)

@@ -7,19 +7,19 @@ import (
 	"path/filepath"
 	"strings"
 
-	"prx/internal/fsutil"
+	"gate/internal/fsutil"
 
 	"golang.org/x/sys/unix"
 )
 
 const (
-	beginMarker = "# >>> prx managed >>>"
-	endMarker   = "# <<< prx managed <<<"
+	beginMarker = "# >>> gate managed >>>"
+	endMarker   = "# <<< gate managed <<<"
 	hostsPath   = "/etc/hosts"
 )
 
 var runPrivilegedHostsCommand = func(name string, args ...string) error {
-	//nolint:gosec // command and args are fixed by prx; no shell is involved.
+	//nolint:gosec // command and args are fixed by gate; no shell is involved.
 	return exec.Command(name, args...).Run()
 }
 
@@ -132,9 +132,9 @@ func (h Hosts) lock() (func(), error) {
 
 func (h Hosts) lockPath() string {
 	if h.Path == hostsPath {
-		return filepath.Join(os.TempDir(), "prx-hosts.lock")
+		return filepath.Join(os.TempDir(), "gate-hosts.lock")
 	}
-	return h.Path + ".prx.lock"
+	return h.Path + ".gate.lock"
 }
 
 func (h Hosts) write(content []byte) error {
@@ -145,7 +145,7 @@ func (h Hosts) write(content []byte) error {
 }
 
 func writeSystemHosts(content []byte) (err error) {
-	tmp, err := os.CreateTemp("", "prx-hosts-*")
+	tmp, err := os.CreateTemp("", "gate-hosts-*")
 	if err != nil {
 		return err
 	}
@@ -159,7 +159,7 @@ func writeSystemHosts(content []byte) (err error) {
 		return err
 	}
 
-	dst := fmt.Sprintf("%s.prx.tmp.%d", hostsPath, os.Getpid())
+	dst := fmt.Sprintf("%s.gate.tmp.%d", hostsPath, os.Getpid())
 	defer func() { _ = runPrivilegedHostsCommand("sudo", "rm", "-f", dst) }()
 	if err := runPrivilegedHostsCommand("sudo", "install", "-m", "0644", tmpName, dst); err != nil {
 		return fmt.Errorf("%w: sudo install %s: %w", os.ErrPermission, hostsPath, err)
@@ -170,7 +170,7 @@ func writeSystemHosts(content []byte) (err error) {
 	return nil
 }
 
-// verifyTarget hardens against symlink attacks: prx refuses to edit a path that
+// verifyTarget hardens against symlink attacks: gate refuses to edit a path that
 // is a symlink (an attacker could point it at a sensitive file).
 func verifyTarget(path string) error {
 	info, err := os.Lstat(path)

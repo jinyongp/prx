@@ -37,38 +37,38 @@ done
 OS="$(uname -s | tr "[:upper:]" "[:lower:]")"
 HOME_DIR="${HOME:?HOME is required to locate user uninstall targets}"
 
-prx_config_dir() {
+gate_config_dir() {
   if [ -n "${XDG_CONFIG_HOME:-}" ]; then
-    printf '%s\n' "${XDG_CONFIG_HOME}/prx"
+    printf '%s\n' "${XDG_CONFIG_HOME}/gate"
     return
   fi
-  printf '%s\n' "${HOME_DIR}/.config/prx"
+  printf '%s\n' "${HOME_DIR}/.config/gate"
 }
 
-prx_data_dir() {
+gate_data_dir() {
   if [ -n "${XDG_DATA_HOME:-}" ]; then
-    printf '%s\n' "${XDG_DATA_HOME}/prx"
+    printf '%s\n' "${XDG_DATA_HOME}/gate"
     return
   fi
-  printf '%s\n' "${HOME_DIR}/.local/share/prx"
+  printf '%s\n' "${HOME_DIR}/.local/share/gate"
 }
 
-prx_state_dir() {
+gate_state_dir() {
   if [ -n "${XDG_STATE_HOME:-}" ]; then
-    printf '%s\n' "${XDG_STATE_HOME}/prx"
+    printf '%s\n' "${XDG_STATE_HOME}/gate"
     return
   fi
   if [ "$OS" = "darwin" ]; then
-    printf '%s\n' "${HOME_DIR}/Library/Logs/prx"
+    printf '%s\n' "${HOME_DIR}/Library/Logs/gate"
     return
   fi
-  printf '%s\n' "${HOME_DIR}/.local/state/prx"
+  printf '%s\n' "${HOME_DIR}/.local/state/gate"
 }
 
 collect_paths() {
-  cfg_dir="$(prx_config_dir)"
-  dat_dir="$(prx_data_dir)"
-  st_dir="$(prx_state_dir)"
+  cfg_dir="$(gate_config_dir)"
+  dat_dir="$(gate_data_dir)"
+  st_dir="$(gate_state_dir)"
 
   if [ -e "$cfg_dir" ] || [ -L "$cfg_dir" ]; then
     printf '%s\n' "$cfg_dir" >> "$WORKFILE"
@@ -80,14 +80,14 @@ collect_paths() {
     printf '%s\n' "$st_dir" >> "$WORKFILE"
   fi
 
-  if [ -n "${PRX_BIN_DIR:-}" ] && { [ -f "${PRX_BIN_DIR}/prx" ] || [ -L "${PRX_BIN_DIR}/prx" ]; }; then
-    printf '%s\n' "${PRX_BIN_DIR}/prx" >> "$WORKFILE"
+  if [ -n "${GATE_BIN_DIR:-}" ] && { [ -f "${GATE_BIN_DIR}/gate" ] || [ -L "${GATE_BIN_DIR}/gate" ]; }; then
+    printf '%s\n' "${GATE_BIN_DIR}/gate" >> "$WORKFILE"
   fi
-  if [ -f "${HOME_DIR}/.local/bin/prx" ] || [ -L "${HOME_DIR}/.local/bin/prx" ]; then
-    printf '%s\n' "${HOME_DIR}/.local/bin/prx" >> "$WORKFILE"
+  if [ -f "${HOME_DIR}/.local/bin/gate" ] || [ -L "${HOME_DIR}/.local/bin/gate" ]; then
+    printf '%s\n' "${HOME_DIR}/.local/bin/gate" >> "$WORKFILE"
   fi
-  if [ -f "/usr/local/bin/prx" ] || [ -L "/usr/local/bin/prx" ]; then
-    printf '%s\n' "/usr/local/bin/prx" >> "$WORKFILE"
+  if [ -f "/usr/local/bin/gate" ] || [ -L "/usr/local/bin/gate" ]; then
+    printf '%s\n' "/usr/local/bin/gate" >> "$WORKFILE"
   fi
 }
 
@@ -115,7 +115,7 @@ if [ -s "$SORTED_FILE" ]; then
 fi
 
 stop_daemon() {
-  pid_file="$1/prx.pid"
+  pid_file="$1/gate.pid"
   if [ ! -f "$pid_file" ]; then
     return
   fi
@@ -126,9 +126,9 @@ stop_daemon() {
   if kill -0 "$PID" 2>/dev/null; then
     args="$(ps -p "$PID" -o args= 2>/dev/null || true)"
     case "$args" in
-      prx\ __serve*|*/prx\ __serve*) ;;
+      gate\ __serve*|*/gate\ __serve*) ;;
       *)
-        ui_error "skipping daemon stop for stale/non-prx pid: $PID"
+        ui_error "skipping daemon stop for stale/non-gate pid: $PID"
         return
         ;;
     esac
@@ -142,7 +142,7 @@ while IFS= read -r target; do
   fi
 
   if [ -d "$target" ]; then
-    if [ "$(basename "$target")" = "prx" ]; then
+    if [ "$(basename "$target")" = "gate" ]; then
       stop_daemon "$target"
     fi
     if rm -rf "$target"; then status=0; else status=$?; fi
@@ -165,7 +165,7 @@ done < "$SORTED_FILE"
 
 if [ "$FOUND" -eq 0 ]; then
   ui_section "Uninstall complete"
-  echo "No prx installation artifacts found."
+  echo "No gate installation artifacts found."
   exit 0
 fi
 
@@ -177,9 +177,9 @@ if command -v hash >/dev/null 2>&1; then
 fi
 
 if [ "$FAILED" -eq 1 ]; then
-  ui_error "prx uninstall completed with errors."
+  ui_error "gate uninstall completed with errors."
   exit 1
 fi
 
 ui_section "Uninstall complete"
-ui_ok "prx uninstalled."
+ui_ok "gate uninstalled."

@@ -13,7 +13,7 @@ import (
 // environment, forwarding the provided stdio, and returns the child's exit
 // code. No file is touched, so the caller's .env is never clobbered.
 func Exec(port int, name string, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
-	//nolint:gosec // G204: executing user-requested command is required for `prx run`.
+	//nolint:gosec // G204: executing user-requested command is required for `gate run`.
 	cmd := exec.Command(name, args...)
 	cmd.Env = append(os.Environ(), "PORT="+strconv.Itoa(port))
 	cmd.Stdin = stdin
@@ -25,7 +25,7 @@ func Exec(port int, name string, args []string, stdin io.Reader, stdout, stderr 
 		if errors.As(err, &ee) {
 			return ee.ExitCode()
 		}
-		fmt.Fprintln(stderr, "prx run:", err)
+		fmt.Fprintln(stderr, "gate run:", err)
 		return 1
 	}
 	return 0

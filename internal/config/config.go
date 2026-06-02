@@ -1,4 +1,4 @@
-// Package config loads and edits the per-project prx.toml. The TOML is the
+// Package config loads and edits the per-project gate.toml. The TOML is the
 // single source of truth for a project; it is parsed for reading and edited
 // surgically (comment-preserving) for writing — see edit.go.
 package config
@@ -18,7 +18,7 @@ import (
 )
 
 // Filename is the fixed project config name.
-const Filename = "prx.toml"
+const Filename = "gate.toml"
 
 // TLS modes.
 const (
@@ -26,8 +26,8 @@ const (
 	TLSACME     = "acme"
 )
 
-// ErrNotFound is returned by Discover when no prx.toml is found within bounds.
-var ErrNotFound = errors.New("prx.toml not found")
+// ErrNotFound is returned by Discover when no gate.toml is found within bounds.
+var ErrNotFound = errors.New("gate.toml not found")
 
 // Service is a single domain → port mapping within a project.
 type Service struct {
@@ -37,7 +37,7 @@ type Service struct {
 	ACMEDNS string `toml:"acme_dns,omitempty"`
 }
 
-// Project is the decoded prx.toml.
+// Project is the decoded gate.toml.
 type Project struct {
 	Name     string
 	EnvFiles []string
@@ -63,7 +63,7 @@ type rawService struct {
 var domainRe = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9._-]*[a-zA-Z0-9])?$`)
 var envKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
-// Load reads and validates the prx.toml at path.
+// Load reads and validates the gate.toml at path.
 func Load(path string) (*Project, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -271,7 +271,7 @@ func expandEnvRef(expr string, env map[string]string, context string) (string, e
 	return value, nil
 }
 
-// CanonicalDomain returns the case-insensitive DNS identity prx uses for config,
+// CanonicalDomain returns the case-insensitive DNS identity gate uses for config,
 // registry, proxy lookup and certificate cache keys.
 func CanonicalDomain(domain string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
@@ -302,7 +302,7 @@ func (p *Project) Validate() error {
 	return nil
 }
 
-// Discover walks upward from start looking for prx.toml. The search stops
+// Discover walks upward from start looking for gate.toml. The search stops
 // after the first git root (a directory containing .git) or $HOME or the
 // filesystem root, whichever comes first. Sibling directories are not searched.
 func Discover(start string) (string, error) {

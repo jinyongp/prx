@@ -8,11 +8,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"prx/internal/daemon"
-	"prx/internal/paths"
-	"prx/internal/port"
-	"prx/internal/proxy"
-	"prx/internal/registry"
+	"gate/internal/daemon"
+	"gate/internal/paths"
+	"gate/internal/port"
+	"gate/internal/proxy"
+	"gate/internal/registry"
 )
 
 func setupUpProject(t *testing.T) {
@@ -29,7 +29,7 @@ domain = "web.demo.localhost"
 domain = "api.demo.localhost"
 port = 4501
 `
-	if err := os.WriteFile(filepath.Join(dir, "prx.toml"), []byte(toml), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(dir, "gate.toml"), []byte(toml), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	t.Chdir(dir)
@@ -104,7 +104,7 @@ func TestUpUpdatesExistingFixedPort(t *testing.T) {
 
 func TestUpPrunesMissingConfigReservationBeforeConflict(t *testing.T) {
 	setupUpProject(t)
-	missing := filepath.Join(t.TempDir(), "missing", "prx.toml")
+	missing := filepath.Join(t.TempDir(), "missing", "gate.toml")
 	if err := registryStore().Update(func(reg *registry.Registry) error {
 		return reg.Reserve(registry.Reservation{
 			Project:    "old",
@@ -152,7 +152,7 @@ func TestDownDeactivatesKeepsReservation(t *testing.T) {
 
 func TestUpDownReloadRunningDaemon(t *testing.T) {
 	setupUpProject(t)
-	shortConfigDir, err := os.MkdirTemp("/tmp", "prx-cli-")
+	shortConfigDir, err := os.MkdirTemp("/tmp", "gate-cli-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -190,7 +190,7 @@ func TestUpDownReloadRunningDaemon(t *testing.T) {
 
 func TestUpDaemonStartsAndReloads(t *testing.T) {
 	setupUpProject(t)
-	shortConfigDir, err := os.MkdirTemp("/tmp", "prx-cli-")
+	shortConfigDir, err := os.MkdirTemp("/tmp", "gate-cli-")
 	if err != nil {
 		t.Fatal(err)
 	}

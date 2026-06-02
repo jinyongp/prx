@@ -25,7 +25,7 @@ func TestExecPropagatesExitCode(t *testing.T) {
 
 func TestExecMissingBinary(t *testing.T) {
 	var out, errb bytes.Buffer
-	code := Exec(1, "prx-no-such-binary-xyz", nil, nil, &out, &errb)
+	code := Exec(1, "gate-no-such-binary-xyz", nil, nil, &out, &errb)
 	if code != 1 {
 		t.Fatalf("exit = %d, want 1", code)
 	}

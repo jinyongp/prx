@@ -7,12 +7,12 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"prx/internal/ui"
+	"gate/internal/ui"
 )
 
 // CmdSpec is the single source of truth for a subcommand's name, positional
 // argument signature, and one-line summary. It drives both the root usage
-// screen (cmd/prx) and per-command help/usage rendering here.
+// screen (cmd/gate) and per-command help/usage rendering here.
 type CmdSpec struct {
 	Name    string
 	Args    string // positional signature, e.g. "<domain> <port>"; "" if none
@@ -20,9 +20,9 @@ type CmdSpec struct {
 }
 
 // Specs lists every public subcommand in display order. Keep in sync with the
-// dispatch table in cmd/prx/main.go.
+// dispatch table in cmd/gate/main.go.
 var Specs = []CmdSpec{
-	{"init", "", "scaffold a starter prx.toml in the current directory"},
+	{"init", "", "scaffold a starter gate.toml in the current directory"},
 	{"up", "", "bring up the current project: reserve ports, render routes, reload"},
 	{"down", "", "tear down the current project's routes and free its ports"},
 	{"ls", "", "list current project reservations with live/down status"},
@@ -36,7 +36,7 @@ var Specs = []CmdSpec{
 	{"ca", "export [--out <path>]", "export the local CA certificate"},
 	{"expose", "<service> --via <provider>", "publish a local service through a public tunnel provider"},
 	{"completion", "<bash|zsh|fish>", "print shell completion script (bash|zsh|fish)"},
-	{"upgrade", "", "upgrade prx to the latest GitHub release"},
+	{"upgrade", "", "upgrade gate to the latest GitHub release"},
 	{"skill", "path|print", "locate or print the bundled agent skill (path|print)"},
 }
 
@@ -95,9 +95,9 @@ func section(w io.Writer, label string) string {
 	return label
 }
 
-// signature builds "prx <name> <args> [flags]".
+// signature builds "gate <name> <args> [flags]".
 func signature(name, args string, hasFlags bool) string {
-	sig := "prx " + name
+	sig := "gate " + name
 	if args != "" {
 		sig += " " + args
 	}
@@ -126,11 +126,11 @@ func usageFail(stderr io.Writer, jsonOut bool, name string) int {
 	return ExitUsage
 }
 
-// WriteHelp renders a subcommand's detailed help in prx's unified style: a title
-// line, a USAGE section, and an optional FLAGS section. Exported so cmd/prx can
+// WriteHelp renders a subcommand's detailed help in gate's unified style: a title
+// line, a USAGE section, and an optional FLAGS section. Exported so cmd/gate can
 // render the cobra-managed `completion` command identically.
 func WriteHelp(w io.Writer, name, args, summary string, flags []FlagInfo) {
-	title := "prx " + name
+	title := "gate " + name
 	switch {
 	case !ui.Enabled(w) && summary != "":
 		fmt.Fprintf(w, "%s — %s\n", title, summary)

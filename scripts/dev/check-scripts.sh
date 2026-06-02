@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-sh -n scripts/install.sh scripts/uninstall.sh scripts/lib/*.sh scripts/release/build-prx.sh
+sh -n scripts/install.sh scripts/uninstall.sh scripts/lib/*.sh scripts/release/build-gate.sh
 bash -n .github/scripts/*.sh scripts/dev/*.sh scripts/release/*.sh
 
 if command -v shellcheck >/dev/null 2>&1; then

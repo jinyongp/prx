@@ -41,11 +41,11 @@ set -euo pipefail
   echo "| publish release | ${PUBLISH_RELEASE_OUTCOME} |"
   echo
   echo "### Artifacts"
-  if ls prx-* >/dev/null 2>&1; then
+  if ls gate-* >/dev/null 2>&1; then
     echo
     echo "| File | Size | SHA-256 |"
     echo "| --- | ---: | --- |"
-    for file in prx-darwin-amd64 prx-darwin-arm64 prx-linux-amd64 prx-linux-arm64; do
+    for file in gate-darwin-amd64 gate-darwin-arm64 gate-linux-amd64 gate-linux-arm64; do
       [ -f "$file" ] || continue
       size="$(du -h "$file" | awk '{print $1}')"
       sha="-"

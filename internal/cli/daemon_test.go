@@ -3,9 +3,9 @@ package cli
 import (
 	"bytes"
 	"fmt"
+	"gate/internal/daemon"
 	"os"
 	"os/exec"
-	"prx/internal/daemon"
 	"strings"
 	"testing"
 )
@@ -22,7 +22,7 @@ func TestDaemonStartReportsChildStderr(t *testing.T) {
 		}
 		//nolint:gosec // G204: test launches this same test binary as a helper process.
 		cmd := exec.Command(exe, "-test.run=TestDaemonStartHelperProcess", "--", "__serve")
-		cmd.Env = append(os.Environ(), "PRX_TEST_DAEMON_START_HELPER=1")
+		cmd.Env = append(os.Environ(), "GATE_TEST_DAEMON_START_HELPER=1")
 		return cmd
 	}
 
@@ -88,9 +88,9 @@ func TestRestartListenAddrsAllowsExplicitOverrides(t *testing.T) {
 }
 
 func TestDaemonStartHelperProcess(t *testing.T) {
-	if os.Getenv("PRX_TEST_DAEMON_START_HELPER") != "1" {
+	if os.Getenv("GATE_TEST_DAEMON_START_HELPER") != "1" {
 		return
 	}
-	fmt.Fprintln(os.Stderr, "prx: listen tcp :443: bind: permission denied")
+	fmt.Fprintln(os.Stderr, "gate: listen tcp :443: bind: permission denied")
 	os.Exit(1)
 }

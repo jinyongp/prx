@@ -1,40 +1,40 @@
-# prx usage
+# gate usage
 
-`prx` maps local domains to local dev servers over HTTPS and keeps a
+`gate` maps local domains to local dev servers over HTTPS and keeps a
 machine-wide registry of domain and port reservations.
 
-Use project mode when a repository should carry its routing in `prx.toml`.
+Use project mode when a repository should carry its routing in `gate.toml`.
 Use standalone mode when you want a machine-local mapping without adding a
 project file.
 
 ## Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/install.sh | sh
 ```
 
 If the install directory is not in `PATH`, resolve the binary once:
 
 ```bash
-if command -v prx >/dev/null 2>&1; then
-  PRX_BIN="$(command -v prx)"
-elif [ -x "$HOME/.local/bin/prx" ]; then
-  PRX_BIN="$HOME/.local/bin/prx"
+if command -v gate >/dev/null 2>&1; then
+  GATE_BIN="$(command -v gate)"
+elif [ -x "$HOME/.local/bin/gate" ]; then
+  GATE_BIN="$HOME/.local/bin/gate"
 else
-  echo "prx not found" >&2
+  echo "gate not found" >&2
   exit 1
 fi
 ```
 
-The rest of this document uses `prx`; replace it with `"$PRX_BIN"` when needed.
+The rest of this document uses `gate`; replace it with `"$GATE_BIN"` when needed.
 
 ## Trust HTTPS
 
-`prx` issues local certificates from a local root CA. To remove browser
+`gate` issues local certificates from a local root CA. To remove browser
 certificate warnings, trust the CA once:
 
 ```bash
-prx trust
+gate trust
 ```
 
 This can require OS administrator approval. `.localhost` domains need no DNS
@@ -43,22 +43,22 @@ DNS may ask for permission.
 
 ## Project Mode
 
-Project mode uses a `prx.toml` file in the repository. This is the shareable,
+Project mode uses a `gate.toml` file in the repository. This is the shareable,
 repeatable path for a team.
 
 Create a starter config:
 
 ```bash
-prx init
+gate init
 ```
 
 Non-interactive default:
 
 ```bash
-prx init -y
+gate init -y
 ```
 
-Example `prx.toml`:
+Example `gate.toml`:
 
 ```toml
 [project]
@@ -75,13 +75,13 @@ port = 3001
 Bring the project up and start the daemon:
 
 ```bash
-prx up -d
+gate up -d
 ```
 
 Run a dev server with its reserved port injected as `PORT`:
 
 ```bash
-prx run web -- pnpm dev
+gate run web -- pnpm dev
 ```
 
 Open:
@@ -93,37 +93,37 @@ https://app.localhost
 Stop routing for the current project while keeping reservations:
 
 ```bash
-prx down
+gate down
 ```
 
 ## Standalone Mode
 
-Standalone mode creates machine-local mappings without `prx.toml`. It is useful
+Standalone mode creates machine-local mappings without `gate.toml`. It is useful
 when you already know the domain and port and do not want a project file.
 
 Add a mapping:
 
 ```bash
-prx add web.localhost 3000
+gate add web.localhost 3000
 ```
 
 If the daemon is running, routes are hot-reloaded. If it is stopped, starting it
 later loads active standalone routes from the registry:
 
 ```bash
-prx daemon start
+gate daemon start
 ```
 
 Run a dev server through the standalone reservation:
 
 ```bash
-prx run web.localhost -- pnpm dev
+gate run web.localhost -- pnpm dev
 ```
 
 Or use the port in your own command:
 
 ```bash
-PORT=$(prx port web.localhost) pnpm dev
+PORT=$(gate port web.localhost) pnpm dev
 ```
 
 Open:
@@ -135,10 +135,10 @@ https://web.localhost
 Remove the standalone mapping:
 
 ```bash
-prx rm web.localhost
+gate rm web.localhost
 ```
 
-Standalone mode is local-machine routing. `prx expose` currently works with
+Standalone mode is local-machine routing. `gate expose` currently works with
 project services, not standalone domains.
 
 ## Inspect Reservations
@@ -146,39 +146,39 @@ project services, not standalone domains.
 Current project reservations:
 
 ```bash
-prx ls
+gate ls
 ```
 
 All reservations:
 
 ```bash
-prx ls -a
+gate ls -a
 ```
 
 Only live or down reservations:
 
 ```bash
-prx ls --status live
-prx ls --status down
+gate ls --status live
+gate ls --status down
 ```
 
 Port-focused view for the current project:
 
 ```bash
-prx port
+gate port
 ```
 
 All reserved ports:
 
 ```bash
-prx port -a
+gate port -a
 ```
 
 One service or standalone domain:
 
 ```bash
-prx port web
-prx port web.localhost
+gate port web
+gate port web.localhost
 ```
 
 ## Manage Reservations
@@ -186,42 +186,42 @@ prx port web.localhost
 Add a domain and fixed port:
 
 ```bash
-prx add web.localhost 3000
+gate add web.localhost 3000
 ```
 
-Inside a project, this appends a `[services.<name>]` block to `prx.toml` and
+Inside a project, this appends a `[services.<name>]` block to `gate.toml` and
 updates the registry. Outside a project, this creates a standalone registry
 reservation.
 
 Remove a domain:
 
 ```bash
-prx rm web.localhost
+gate rm web.localhost
 ```
 
-Inside a project, if the domain belongs to a service in `prx.toml`, that service
+Inside a project, if the domain belongs to a service in `gate.toml`, that service
 block is removed and the registry is updated. Otherwise, the matching registry
 reservation is removed.
 
 Remove all reservations for the current project:
 
 ```bash
-prx rm --project
+gate rm --project
 ```
 
 Remove all reservations for a named project:
 
 ```bash
-prx rm --project myapp
+gate rm --project myapp
 ```
 
-Prune stale reservations whose owning `prx.toml` no longer exists:
+Prune stale reservations whose owning `gate.toml` no longer exists:
 
 ```bash
-prx prune
+gate prune
 ```
 
-Standalone reservations are not pruned by `prx prune` because they have no
+Standalone reservations are not pruned by `gate prune` because they have no
 owning config file.
 
 ## Daemon
@@ -229,20 +229,20 @@ owning config file.
 Start, stop, restart, and inspect the resident proxy:
 
 ```bash
-prx daemon start
-prx daemon stop
-prx daemon restart
-prx daemon status
-prx daemon logs
+gate daemon start
+gate daemon stop
+gate daemon restart
+gate daemon status
+gate daemon logs
 ```
 
 Start on custom front-proxy ports:
 
 ```bash
-prx daemon start --https-addr 127.0.0.1:18443 --http-addr 127.0.0.1:18080
+gate daemon start --https-addr 127.0.0.1:18443 --http-addr 127.0.0.1:18080
 ```
 
-`prx up -d` starts the daemon when needed and reloads project routes.
+`gate up -d` starts the daemon when needed and reloads project routes.
 
 ## JSON Output
 
@@ -252,13 +252,13 @@ JSON mode are written to stderr as an error envelope.
 Examples:
 
 ```bash
-prx up --json
-prx ls --json
-prx port -a --json
-prx daemon status --json
-prx add web.localhost 3000 --json
-prx rm web.localhost --json
-prx prune --json
+gate up --json
+gate ls --json
+gate port -a --json
+gate daemon status --json
+gate add web.localhost 3000 --json
+gate rm web.localhost --json
+gate prune --json
 ```
 
 ## Access From Another Device
@@ -266,15 +266,15 @@ prx prune --json
 Access from another device needs two separate pieces:
 
 1. The other device must resolve the domain to a reachable address.
-2. The other device must trust prx's root CA if you want a clean HTTPS page.
+2. The other device must trust gate's root CA if you want a clean HTTPS page.
 
 Export the root CA certificate:
 
 ```bash
-prx ca export --out prx-root.crt
+gate ca export --out gate-root.crt
 ```
 
-Install `prx-root.crt` on the other device as a trusted root certificate. Do
+Install `gate-root.crt` on the other device as a trusted root certificate. Do
 not copy or share `root.key`; only export/share the `.crt` file.
 
 ### Same Machine
@@ -289,9 +289,9 @@ domain = "app.localhost"
 Then:
 
 ```bash
-prx trust
-prx up -d
-prx run web -- pnpm dev
+gate trust
+gate up -d
+gate run web -- pnpm dev
 ```
 
 Open:
@@ -308,25 +308,25 @@ must reach your dev server.
 Prerequisites:
 
 - Use a `.local` service domain.
-- Start prx routes first with `prx up -d`.
-- Start the dev server, usually with `prx run <service> -- ...`.
-- Install the exported prx root CA on other devices if you want trusted HTTPS.
+- Start gate routes first with `gate up -d`.
+- Start the dev server, usually with `gate run <service> -- ...`.
+- Install the exported gate root CA on other devices if you want trusted HTTPS.
 - Make sure the other device can resolve the `.local` name to the development
   machine. If name resolution does not work on your network, add a hosts entry
   or use another local DNS mechanism.
 
 Limitations:
 
-- `prx expose <service> --via lan` only accepts a `.local` domain.
+- `gate expose <service> --via lan` only accepts a `.local` domain.
 - The current LAN provider does not itself advertise mDNS or edit other devices'
-  DNS/hosts files. It validates the domain and marks the running prx route as
+  DNS/hosts files. It validates the domain and marks the running gate route as
   exposed.
-- `prx expose` currently works with project services, not standalone domains.
+- `gate expose` currently works with project services, not standalone domains.
 - Devices must be on a network path that can reach the development machine.
-- Browser trust still depends on installing the prx root CA on each client
+- Browser trust still depends on installing the gate root CA on each client
   device.
 
-Example `prx.toml`:
+Example `gate.toml`:
 
 ```toml
 [project]
@@ -339,15 +339,15 @@ domain = "myapp.local"
 Start the proxy and service:
 
 ```bash
-prx trust
-prx up -d
-prx run web -- pnpm dev
+gate trust
+gate up -d
+gate run web -- pnpm dev
 ```
 
 Expose the route for LAN clients:
 
 ```bash
-prx expose web --via lan
+gate expose web --via lan
 ```
 
 On another device, make sure `myapp.local` resolves to the development machine,
@@ -373,10 +373,10 @@ Prerequisites:
 
 - Install [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
 - Allow outbound internet access from the development machine.
-- Start prx routes first with `prx up -d`.
-- Start the dev server, usually with `prx run <service> -- ...`.
-- Run `prx trust` on the development machine if `cloudflared` needs to trust
-  prx's local HTTPS origin.
+- Start gate routes first with `gate up -d`.
+- Start the dev server, usually with `gate run <service> -- ...`.
+- Run `gate trust` on the development machine if `cloudflared` needs to trust
+  gate's local HTTPS origin.
 
 No Cloudflare account, zone, DNS record, or tunnel config file is required for
 this quick-tunnel mode.
@@ -384,7 +384,7 @@ this quick-tunnel mode.
 Example:
 
 ```bash
-prx expose web --via cloudflared
+gate expose web --via cloudflared
 ```
 
 The command starts a quick tunnel to `https://<service-domain>` and prints a
@@ -398,10 +398,10 @@ web exposed via cloudflared
 For a public URL, prefer auth:
 
 ```bash
-prx expose web --via cloudflared --auth user:pass
+gate expose web --via cloudflared --auth user:pass
 ```
 
-Without `--auth`, prx warns because anyone with the public URL can reach your
+Without `--auth`, gate warns because anyone with the public URL can reach your
 dev server.
 
 Limitations:
@@ -409,9 +409,9 @@ Limitations:
 - The URL is temporary and random.
 - The URL is not tied to your own domain.
 - The tunnel lasts only while the `cloudflared` process keeps running.
-- `prx expose` currently works with project services, not standalone domains.
-- The tunnel targets prx's local HTTPS origin. If origin certificate trust fails,
-  run `prx trust` on the development machine and retry.
+- `gate expose` currently works with project services, not standalone domains.
+- The tunnel targets gate's local HTTPS origin. If origin certificate trust fails,
+  run `gate trust` on the development machine and retry.
 - This mode is not a stable production tunnel configuration.
 
 ### Tailnet With Tailscale
@@ -427,19 +427,19 @@ Prerequisites:
   your tailnet policy.
 - Enable/use [Tailscale Serve](https://tailscale.com/docs/features/tailscale-serve)
   support for the machine.
-- Start prx routes first with `prx up -d`.
-- Start the dev server, usually with `prx run <service> -- ...`.
+- Start gate routes first with `gate up -d`.
+- Start the dev server, usually with `gate run <service> -- ...`.
 
 Limitations:
 
-- `prx expose` currently works with project services, not standalone domains.
+- `gate expose` currently works with project services, not standalone domains.
 - Access is limited to devices allowed by the tailnet and ACLs.
-- The current implementation runs `tailscale serve --bg`; prx does not manage
+- The current implementation runs `tailscale serve --bg`; gate does not manage
   detailed Tailscale Serve state after that.
 - Tear-down is manual with Tailscale commands.
 
 ```bash
-prx expose web --via tailscale
+gate expose web --via tailscale
 ```
 
 This runs `tailscale serve --bg https://<service-domain>`. Tear it down with
@@ -460,10 +460,10 @@ Supported providers:
 | `cloudflared` | temporary public URL | requires `cloudflared` |
 | `tailscale` | tailnet access | requires `tailscale` |
 
-`prx expose` currently requires a project service name:
+`gate expose` currently requires a project service name:
 
 ```bash
-prx expose <service> --via <provider>
+gate expose <service> --via <provider>
 ```
 
 It does not currently accept standalone domains directly.
@@ -473,39 +473,39 @@ It does not currently accept standalone domains directly.
 Export the root CA certificate for another device:
 
 ```bash
-prx ca export --out prx-root.crt
+gate ca export --out gate-root.crt
 ```
 
 ## Upgrade
 
 ```bash
-prx upgrade
+gate upgrade
 ```
 
 Skip confirmation:
 
 ```bash
-prx upgrade -y
+gate upgrade -y
 ```
 
 ## Completion
 
 ```bash
-prx completion bash
-prx completion zsh
-prx completion fish
+gate completion bash
+gate completion zsh
+gate completion fish
 ```
 
 ## Uninstall
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/uninstall.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstall.sh | sh
 ```
 
 Non-interactive:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/uninstall.sh | sh -s -- -y
+curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstall.sh | sh -s -- -y
 ```
 
 The uninstall script removes user-level config, data, state, and known binary

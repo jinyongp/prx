@@ -10,17 +10,17 @@ import (
 	"strings"
 	"text/tabwriter"
 
-	"prx/internal/config"
-	"prx/internal/daemon"
-	"prx/internal/dns"
-	"prx/internal/paths"
-	"prx/internal/port"
-	"prx/internal/proxy"
-	"prx/internal/registry"
-	"prx/internal/ui"
+	"gate/internal/config"
+	"gate/internal/daemon"
+	"gate/internal/dns"
+	"gate/internal/paths"
+	"gate/internal/port"
+	"gate/internal/proxy"
+	"gate/internal/registry"
+	"gate/internal/ui"
 )
 
-// service is one row of `prx ls` output.
+// service is one row of `gate ls` output.
 type service struct {
 	Project string `json:"project"`
 	Service string `json:"service"`
@@ -141,7 +141,7 @@ func Ls(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(rows) == 0 {
 		if richOut(stdout, false) {
-			fmt.Fprintln(stdout, ui.Dim.Render("No reservations yet — run `prx up` in a project or `prx add <domain> <port>`."))
+			fmt.Fprintln(stdout, ui.Dim.Render("No reservations yet — run `gate up` in a project or `gate add <domain> <port>`."))
 		} else {
 			fmt.Fprintln(stdout, "No reservations.")
 		}
@@ -213,7 +213,7 @@ func lookupServiceReservation(svc string) (registry.Reservation, *reservationLoo
 		}
 		res, ok := reg.Get(registry.Key(project.Name, svc))
 		if !ok || res.Port == 0 {
-			return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "not_allocated", Message: "no port allocated; run prx up"}
+			return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "not_allocated", Message: "no port allocated; run gate up"}
 		}
 		return res, nil
 	}
@@ -227,7 +227,7 @@ func lookupServiceReservation(svc string) (registry.Reservation, *reservationLoo
 	}
 	res, ok := standaloneReservation(reg, svc)
 	if !ok || res.Port == 0 {
-		return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "not_allocated", Message: fmt.Sprintf("no standalone port for %q; run prx add <domain> <port>", svc)}
+		return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "not_allocated", Message: fmt.Sprintf("no standalone port for %q; run gate add <domain> <port>", svc)}
 	}
 	return res, nil
 }
@@ -285,7 +285,7 @@ func listPorts(stdout, stderr io.Writer, jsonOut, all bool) int {
 	}
 	if len(rows) == 0 {
 		if richOut(stdout, false) {
-			fmt.Fprintln(stdout, ui.Dim.Render("No reserved ports yet — run `prx up` in a project or `prx add <domain> <port>`."))
+			fmt.Fprintln(stdout, ui.Dim.Render("No reserved ports yet — run `gate up` in a project or `gate add <domain> <port>`."))
 		} else {
 			fmt.Fprintln(stdout, "No reserved ports.")
 		}
@@ -328,8 +328,8 @@ func displayPortOwner(r portRow) string {
 	return "-"
 }
 
-// Add reserves a domain→port mapping. Inside a prx project, it also appends a
-// service block to prx.toml; outside a project it creates a standalone registry
+// Add reserves a domain→port mapping. Inside a gate project, it also appends a
+// service block to gate.toml; outside a project it creates a standalone registry
 // entry.
 func Add(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
@@ -687,7 +687,7 @@ func addError(stderr io.Writer, jsonOut bool, err error) int {
 	return fail(stderr, jsonOut, ExitError, "registry_error", err.Error())
 }
 
-// Prune garbage-collects reservations whose owning prx.toml no longer exists.
+// Prune garbage-collects reservations whose owning gate.toml no longer exists.
 func Prune(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("prune", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
@@ -713,7 +713,7 @@ func Prune(args []string, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
-// Run executes `prx run <service> -- <cmd...>` with PORT injected.
+// Run executes `gate run <service> -- <cmd...>` with PORT injected.
 func Run(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
 		sp := specFor("run")

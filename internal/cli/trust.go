@@ -7,10 +7,10 @@ import (
 	"io"
 	"os"
 
-	"prx/internal/ca"
-	"prx/internal/daemon"
-	"prx/internal/expose"
-	"prx/internal/paths"
+	"gate/internal/ca"
+	"gate/internal/daemon"
+	"gate/internal/expose"
+	"gate/internal/paths"
 )
 
 // Trust installs the root CA into the OS and browser trust stores.
@@ -33,7 +33,7 @@ func Trust(args []string, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
-// Ca dispatches `prx ca export`.
+// Ca dispatches `gate ca export`.
 func Ca(args []string, stdout, stderr io.Writer) int {
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
 		sp := specFor("ca")
@@ -45,7 +45,7 @@ func Ca(args []string, stdout, stderr io.Writer) int {
 		return ExitUsage
 	}
 	fs := flag.NewFlagSet("ca export", flag.ContinueOnError)
-	out := fs.String("out", "prx-root.crt", "output path")
+	out := fs.String("out", "gate-root.crt", "output path")
 	if handled, code := parseFlags(fs, "ca export", args[1:], stdout, stderr); handled {
 		return code
 	}

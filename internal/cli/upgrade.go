@@ -13,28 +13,28 @@ import (
 	"strings"
 	"time"
 
-	"prx/internal/daemon"
-	"prx/internal/paths"
-	"prx/internal/ui"
+	"gate/internal/daemon"
+	"gate/internal/paths"
+	"gate/internal/ui"
 )
 
 const (
-	upgradeScriptURL = "https://raw.githubusercontent.com/jinyongp/prx/main/scripts/install.sh"
-	githubLatestAPI  = "https://api.github.com/repos/jinyongp/prx/releases/latest"
-	defaultUserAgent = "prx-upgrade"
+	upgradeScriptURL = "https://raw.githubusercontent.com/jinyongp/gate/main/scripts/install.sh"
+	githubLatestAPI  = "https://api.github.com/repos/jinyongp/gate/releases/latest"
+	defaultUserAgent = "gate-upgrade"
 )
 
 var currentVersion = "dev"
 
 var restartDaemonAfterUpgradeFunc = restartDaemonAfterUpgrade
 
-// SetVersion stores the currently running prx version for upgrade decisions.
+// SetVersion stores the currently running gate version for upgrade decisions.
 func SetVersion(v string) {
 	currentVersion = v
 }
 
 // Upgrade downloads and executes the upstream install script to replace the current
-// prx binary with the latest release.
+// gate binary with the latest release.
 func Upgrade(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("upgrade", flag.ContinueOnError)
 	var yes bool
@@ -89,7 +89,7 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, false, ExitError, "upgrade", fmt.Sprintf("failed to download install script: %s", res.Status))
 	}
 
-	script, err := os.CreateTemp("", "prx-upgrade-*.sh")
+	script, err := os.CreateTemp("", "gate-upgrade-*.sh")
 	if err != nil {
 		return fail(stderr, false, ExitError, "upgrade", err.Error())
 	}
@@ -210,7 +210,7 @@ func upgradePrompt(current, latest string) string {
 	if latest != "" {
 		return fmt.Sprintf("upgrade %s -> %s", current, latest)
 	}
-	return "upgrade prx to the latest release"
+	return "upgrade gate to the latest release"
 }
 
 type githubRelease struct {

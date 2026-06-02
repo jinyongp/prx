@@ -129,7 +129,7 @@ func TestGetCertificateConcurrent(t *testing.T) {
 
 func TestExportWritesCertAndFingerprint(t *testing.T) {
 	ca, _ := loadCA(t)
-	out := filepath.Join(t.TempDir(), "prx-root.crt")
+	out := filepath.Join(t.TempDir(), "gate-root.crt")
 	fp, err := ca.Export(out)
 	if err != nil {
 		t.Fatalf("Export: %v", err)

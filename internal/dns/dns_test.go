@@ -38,7 +38,7 @@ func TestHostsEnsurePreservesExternal(t *testing.T) {
 			t.Fatalf("missing %q in:\n%s", want, s)
 		}
 	}
-	if strings.Contains(s, "# prx") {
+	if strings.Contains(s, "# gate") {
 		t.Fatalf("managed entry should not include redundant comment:\n%s", s)
 	}
 	want := "255.255.255.255\tbroadcasthost\n::1\tlocalhost\n\n" +
@@ -136,7 +136,7 @@ func TestHostsRejectsSymlink(t *testing.T) {
 
 func TestSystemHostsUsesTempLockPath(t *testing.T) {
 	h := Hosts{Path: hostsPath}
-	if got := h.lockPath(); got != filepath.Join(os.TempDir(), "prx-hosts.lock") {
+	if got := h.lockPath(); got != filepath.Join(os.TempDir(), "gate-hosts.lock") {
 		t.Fatalf("lockPath = %q", got)
 	}
 }

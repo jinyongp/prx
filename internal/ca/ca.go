@@ -1,4 +1,4 @@
-// Package ca implements prx's local certificate authority: a self-signed root
+// Package ca implements gate's local certificate authority: a self-signed root
 // CA plus per-domain leaf certificates issued on demand for SNI. The root is
 // persisted (its private key 0600); leaves are cached in memory and reissued on
 // restart.
@@ -25,7 +25,7 @@ import (
 const (
 	rootValidity = 10 * 365 * 24 * time.Hour
 	leafValidity = 90 * 24 * time.Hour
-	rootCN       = "prx local CA"
+	rootCN       = "gate local CA"
 )
 
 // CA is the loaded root authority and its in-memory leaf cache.

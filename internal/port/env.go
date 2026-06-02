@@ -4,12 +4,12 @@ import (
 	"os"
 	"strings"
 
-	"prx/internal/fsutil"
+	"gate/internal/fsutil"
 )
 
 // UpsertEnv sets key=value in the dotenv file at path, preserving every other
 // line and comment. The previous file is backed up to path+".bak" first. The
-// file is created if absent. This is opt-in (prx run injects PORT without it).
+// file is created if absent. This is opt-in (gate run injects PORT without it).
 func UpsertEnv(path, key, value string) error {
 	var lines []string
 	if b, err := os.ReadFile(path); err == nil {

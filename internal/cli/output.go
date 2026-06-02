@@ -1,4 +1,4 @@
-// Package cli implements prx's command surface and its human/JSON output
+// Package cli implements gate's command surface and its human/JSON output
 // contract: data on stdout, diagnostics on stderr, a single JSON value under
 // --json, and stable exit codes.
 package cli
@@ -9,9 +9,9 @@ import (
 	"io"
 	"path/filepath"
 
-	"prx/internal/paths"
-	"prx/internal/registry"
-	"prx/internal/ui"
+	"gate/internal/paths"
+	"gate/internal/registry"
+	"gate/internal/ui"
 )
 
 // Exit codes (see README §13).
@@ -59,7 +59,7 @@ func fail(stderr io.Writer, jsonOut bool, code int, errCode, msg string) int {
 		enc := json.NewEncoder(stderr)
 		_ = enc.Encode(errEnvelope{Error: errBody{Code: errCode, Message: msg}})
 	} else {
-		fmt.Fprintf(stderr, "prx: %s\n", msg)
+		fmt.Fprintf(stderr, "gate: %s\n", msg)
 	}
 	return code
 }

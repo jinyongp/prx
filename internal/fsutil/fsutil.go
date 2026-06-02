@@ -1,4 +1,4 @@
-// Package fsutil holds small filesystem helpers shared across prx.
+// Package fsutil holds small filesystem helpers shared across gate.
 package fsutil
 
 import (

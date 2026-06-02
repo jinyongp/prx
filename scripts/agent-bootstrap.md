@@ -1,44 +1,44 @@
-# prx agent bootstrap
+# gate agent bootstrap
 
-Use this file when an AI agent is setting up `prx` for a repository.
+Use this file when an AI agent is setting up `gate` for a repository.
 
-1) Install `prx` binary:
+1) Install `gate` binary:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/install.sh | sh
 ```
 
 2) Resolve the installed binary path. Agent sessions may not have
-`$HOME/.local/bin` in `PATH`, so do not assume `prx` is directly executable:
+`$HOME/.local/bin` in `PATH`, so do not assume `gate` is directly executable:
 
 ```bash
-if command -v prx >/dev/null 2>&1; then
-  PRX_BIN="$(command -v prx)"
-elif [ -x "$HOME/.local/bin/prx" ]; then
-  PRX_BIN="$HOME/.local/bin/prx"
+if command -v gate >/dev/null 2>&1; then
+  GATE_BIN="$(command -v gate)"
+elif [ -x "$HOME/.local/bin/gate" ]; then
+  GATE_BIN="$HOME/.local/bin/gate"
 else
-  echo "prx installed but not found; check installer output." >&2
+  echo "gate installed but not found; check installer output." >&2
   exit 1
 fi
 ```
 
-Use `"$PRX_BIN"` for every later `prx` command in this bootstrap.
+Use `"$GATE_BIN"` for every later `gate` command in this bootstrap.
 
 3) Install the agent skill:
 
 ```bash
 if command -v npx >/dev/null 2>&1; then
-  npx skills add jinyongp/prx
+  npx skills add jinyongp/gate
 elif command -v apm >/dev/null 2>&1; then
-  apm install jinyongp/prx
+  apm install jinyongp/gate
 else
   echo "No skill manager found (npx or apm); skip skill install and report this."
 fi
 ```
 
-4) Add `prx.toml` from project context:
+4) Add `gate.toml` from project context:
 
-- If `prx.toml` already exists, keep it and do not overwrite it.
+- If `gate.toml` already exists, keep it and do not overwrite it.
 - If missing, inspect the project and infer the dev port:
   - `package.json` scripts: Vite → `5173`; Next/Nuxt → `3000`; explicit script/config port wins
   - `go.mod` projects → `8080` default
@@ -49,7 +49,7 @@ fi
   - replace every run of non-`[a-z0-9]` characters with `-`
   - trim leading/trailing `-`
   - fallback to `app` if the result is empty
-- Create `prx.toml` using the detected service name and port:
+- Create `gate.toml` using the detected service name and port:
 
 ```toml
 [project]
@@ -63,24 +63,24 @@ port = <detected-port>
 5) Trust the local root CA once if the machine has not done it yet:
 
 ```bash
-"$PRX_BIN" trust
+"$GATE_BIN" trust
 ```
 
 6) Suggest and run:
 
 ```bash
-"$PRX_BIN" up
+"$GATE_BIN" up
 ```
 
-7) Report `PRX_BIN`, where the install landed, and what was detected.
+7) Report `GATE_BIN`, where the install landed, and what was detected.
 
 8) When removing agent setup, run:
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/uninstall.sh | sh
-# confirm prompt first, then remove all user-level prx artifacts
+curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstall.sh | sh
+# confirm prompt first, then remove all user-level gate artifacts
 # unattended
-curl -fsSL https://raw.githubusercontent.com/jinyongp/prx/main/scripts/uninstall.sh | sh -s -- -y
+curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstall.sh | sh -s -- -y
 ```
 
 This removes user-level `config`, `data`, and `state` directories plus known installer target binaries,

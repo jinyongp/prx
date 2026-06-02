@@ -101,12 +101,12 @@ jobs:
       - id: upload_artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: prx-${{ github.sha }}
+          name: gate-${{ github.sha }}
           path: |
-            prx-darwin-amd64
-            prx-darwin-arm64
-            prx-linux-amd64
-            prx-linux-arm64
+            gate-darwin-amd64
+            gate-darwin-arm64
+            gate-linux-amd64
+            gate-linux-arm64
       - name: checksums
         id: checksums
         run: bash .github/scripts/checksums.sh

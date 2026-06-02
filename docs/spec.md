@@ -1,11 +1,11 @@
-# prx Specification
+# gate Specification
 
-`prx` is a local-development HTTPS reverse proxy and port registry, shipped as a
+`gate` is a local-development HTTPS reverse proxy and port registry, shipped as a
 single Go binary. It maps local domains to local dev servers, keeps domain and
 port reservations stable across projects, and can expose selected local routes
 to other devices for testing.
 
-`prx` is not a production proxy. It is designed for developer machines, local
+`gate` is not a production proxy. It is designed for developer machines, local
 services, and temporary test exposure.
 
 ---
@@ -14,11 +14,11 @@ services, and temporary test exposure.
 
 ### Goals
 
-| Goal | What prx provides |
+| Goal | What gate provides |
 | --- | --- |
 | Local HTTPS by domain | `https://app.localhost` or a custom local domain routes to a local upstream such as `127.0.0.1:4310`. |
 | Stable port assignment | A machine-wide registry reserves ports so projects do not hard-code or guess ports. |
-| Project-local config | `prx.toml` is the shareable source of truth for a repository's local routes. |
+| Project-local config | `gate.toml` is the shareable source of truth for a repository's local routes. |
 | Standalone mappings | A developer can reserve a domain and port without a project file. |
 | Daemon hot reload | A resident proxy can receive new routes without restarting. |
 | Script/agent compatibility | Commands keep stdout data separate from stderr diagnostics; JSON output is stable and parseable. |
@@ -28,10 +28,10 @@ services, and temporary test exposure.
 
 | Non-goal | Reason |
 | --- | --- |
-| Production traffic | prx terminates local dev traffic and assumes a developer-controlled machine. |
-| Hosted environments | prx is not a server deployment platform. |
-| Owning dev server processes | prx can run a child command with `PORT` injected, but it does not manage arbitrary service lifecycles as a process supervisor. |
-| Replacing DNS infrastructure | prx only handles local `.localhost`, local hosts-file reflection, and provider-specific exposure workflows. |
+| Production traffic | gate terminates local dev traffic and assumes a developer-controlled machine. |
+| Hosted environments | gate is not a server deployment platform. |
+| Owning dev server processes | gate can run a child command with `PORT` injected, but it does not manage arbitrary service lifecycles as a process supervisor. |
+| Replacing DNS infrastructure | gate only handles local `.localhost`, local hosts-file reflection, and provider-specific exposure workflows. |
 | Default public exposure | Any route reachable outside loopback must be explicitly exposed. |
 
 ---
@@ -42,7 +42,7 @@ services, and temporary test exposure.
 flowchart LR
     browser["Browser / tool / device"]
     dns["Local DNS outcome<br/>.localhost or hosts entry"]
-    proxy["prx proxy<br/>HTTPS :443 / HTTP :80"]
+    proxy["gate proxy<br/>HTTPS :443 / HTTP :80"]
     route["Atomic route table<br/>host -> upstream"]
     dev["Local dev server<br/>127.0.0.1:PORT"]
 
@@ -56,7 +56,7 @@ flowchart LR
 flowchart TB
     subgraph control["Control Plane"]
         cli["CLI commands"]
-        config["prx.toml<br/>project config"]
+        config["gate.toml<br/>project config"]
         registry["registry.json<br/>machine registry"]
         dnsctl["DNS reflection"]
         daemonctl["Admin socket client"]
@@ -92,8 +92,8 @@ loaded later.
 
 ### Project
 
-A project is a repository with a `prx.toml` file. `prx` discovers the file by
-walking upward from the current directory until it finds `prx.toml`, a `.git`
+A project is a repository with a `gate.toml` file. `gate` discovers the file by
+walking upward from the current directory until it finds `gate.toml`, a `.git`
 root, the user's home directory, or the filesystem root.
 
 ```toml
@@ -115,7 +115,7 @@ A service maps one domain to one upstream port.
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `domain` | string | required | Hostname prx routes. Canonicalized as lowercase without trailing dot. |
+| `domain` | string | required | Hostname gate routes. Canonicalized as lowercase without trailing dot. |
 | `port` | integer or env string | auto-allocate | Local upstream port. `0` or omitted means allocate from the default pool. |
 | `tls` | `internal` or `acme` | `internal` | Certificate provider for the domain. |
 | `acme_dns` | string | required for `acme` | DNS-01 provider key. |
@@ -131,22 +131,22 @@ It survives dev server restarts.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Reserved: prx up / prx add
+    [*] --> Reserved: gate up / gate add
     Reserved --> Active: route loaded
-    Active --> Reserved: prx down
-    Reserved --> Removed: prx rm
-    Reserved --> Removed: prx prune when owning prx.toml is gone
+    Active --> Reserved: gate down
+    Reserved --> Removed: gate rm
+    Reserved --> Removed: gate prune when owning gate.toml is gone
 ```
 
 ### Active Route
 
 An active route is a reservation currently loaded into the proxy. The `Active`
-flag controls whether it is included in the daemon route table. `prx down`
+flag controls whether it is included in the daemon route table. `gate down`
 deactivates project routes but preserves reservations.
 
 ### Liveness
 
-Liveness is not persisted. prx checks whether a dev server is listening by
+Liveness is not persisted. gate checks whether a dev server is listening by
 dialing the reserved upstream. A reserved service can be `down` when no process
 is listening.
 
@@ -157,16 +157,16 @@ is listening.
 ```mermaid
 flowchart LR
     project["Project repo"]
-    prxtoml["prx.toml<br/>human-owned"]
-    cfgdir["Config dir<br/>~/.config/prx"]
+    gatetoml["gate.toml<br/>human-owned"]
+    cfgdir["Config dir<br/>~/.config/gate"]
     registry["registry.json<br/>tool-owned"]
-    sock["prx.sock<br/>admin socket"]
-    datadir["Data dir<br/>~/.local/share/prx"]
+    sock["gate.sock<br/>admin socket"]
+    datadir["Data dir<br/>~/.local/share/gate"]
     ca["root CA and cert cache"]
     statedir["State dir<br/>logs and runtime state"]
     logs["runtime logs<br/>access logs"]
 
-    project --> prxtoml
+    project --> gatetoml
     cfgdir --> registry
     cfgdir --> sock
     datadir --> ca
@@ -175,11 +175,11 @@ flowchart LR
 
 | Data | Owner | Format | Notes |
 | --- | --- | --- | --- |
-| `prx.toml` | Human and CLI | TOML | Shareable project config. Edited surgically so comments and surrounding formatting survive. |
-| `registry.json` | prx only | JSON | Machine-wide reservations. Uses schema versioning, advisory file locking, and atomic write by temp file + rename. |
+| `gate.toml` | Human and CLI | TOML | Shareable project config. Edited surgically so comments and surrounding formatting survive. |
+| `registry.json` | gate only | JSON | Machine-wide reservations. Uses schema versioning, advisory file locking, and atomic write by temp file + rename. |
 | Admin socket | daemon | Unix socket | CLI talks to daemon over a local HTTP API. |
-| CA material | prx | PEM files | Root key is private local state and must not be copied. Export only the root certificate. |
-| Logs | prx / OS service manager | text or JSONL | Runtime and access logs are separate from command data output. |
+| CA material | gate | PEM files | Root key is private local state and must not be copied. Export only the root certificate. |
+| Logs | gate / OS service manager | text or JSONL | Runtime and access logs are separate from command data output. |
 
 Registry schema:
 
@@ -195,7 +195,7 @@ Registry schema:
       "tls": "internal",
       "dns": "localhost",
       "active": true,
-      "config_path": "/repo/prx.toml"
+      "config_path": "/repo/gate.toml"
     }
   }
 }
@@ -206,13 +206,13 @@ Registry schema:
 ## 5. Port Management
 
 The default allocation pool is owned by `internal/port`. When a service omits
-`port`, prx chooses an available port that is not already reserved and is not
+`port`, gate chooses an available port that is not already reserved and is not
 currently bound by the OS.
 
 ```mermaid
 flowchart TD
     start["service needs port"]
-    fixed{"port set in prx.toml?"}
+    fixed{"port set in gate.toml?"}
     existing{"existing reservation?"}
     used["build used-port set<br/>registry + OS probes"]
     allocate["allocate from pool"]
@@ -232,7 +232,7 @@ Rules:
 - Domains are globally unique on the machine.
 - Reserved ports are globally unique on the machine when non-zero.
 - Existing reservations keep their ports unless config changes.
-- Fixed ports from `prx.toml` win over automatic allocation.
+- Fixed ports from `gate.toml` win over automatic allocation.
 - Port reservation is best-effort; the OS can still let another process bind a
   reserved port while the dev server is down.
 
@@ -243,12 +243,12 @@ Rules:
 | Mode | When used | Permission | Behavior |
 | --- | --- | --- | --- |
 | `localhost` | Domains ending in `.localhost` | none | No file changes. Modern resolvers map `.localhost` to loopback. |
-| `hosts` | Custom local domains | sudo may be required | prx writes only its managed block in `/etc/hosts`. |
+| `hosts` | Custom local domains | sudo may be required | gate writes only its managed block in `/etc/hosts`. |
 
 Mode is selected from the domain or forced with `--dns localhost|hosts`.
 
 ```text
-# prx managed block
+# gate managed block
 127.0.0.1  app.example.test
 127.0.0.1  api.example.test
 ```
@@ -280,13 +280,13 @@ flowchart TB
 ### Internal CA
 
 The default provider creates a local root CA and issues leaf certificates for
-local domains. Run `prx trust` once to install the root certificate into OS and
+local domains. Run `gate trust` once to install the root certificate into OS and
 browser trust stores.
 
 For another device, export the root certificate:
 
 ```bash
-prx ca export --out prx-root.crt
+gate ca export --out gate-root.crt
 ```
 
 Never copy or share the root private key.
@@ -311,7 +311,7 @@ acme_dns = "cloudflare"
 ```mermaid
 sequenceDiagram
     participant C as Client
-    participant P as prx HTTPS handler
+    participant P as gate HTTPS handler
     participant R as Route table
     participant U as Upstream dev server
 
@@ -354,7 +354,7 @@ socket.
 
 ```mermaid
 flowchart LR
-    cli["prx up -d"]
+    cli["gate up -d"]
     store["update registry"]
     dns["ensure DNS"]
     start{"daemon running?"}
@@ -378,7 +378,7 @@ Admin API:
 | `POST` | `/reload` | Reserved reload endpoint; currently reports reload success. |
 
 Only one daemon should own the configured HTTPS/HTTP listen addresses. If a
-daemon is already running on different addresses, `prx up -d` refuses with a
+daemon is already running on different addresses, `gate up -d` refuses with a
 conflict.
 
 ---
@@ -387,23 +387,23 @@ conflict.
 
 | Command | Purpose | Data mode |
 | --- | --- | --- |
-| `prx init` | Scaffold a starter `prx.toml`. | human |
-| `prx up [-d]` | Reserve ports, reflect DNS, activate routes, optionally start daemon. | human / JSON |
-| `prx down` | Deactivate current project routes and preserve reservations. | human / JSON |
-| `prx ls [-a] [--status live|down]` | List reservations and liveness. | human / JSON |
-| `prx port [service]` | Print one port or list reserved ports. | human / JSON |
-| `prx add <domain> <port>` | Add a project service or standalone reservation. | human / JSON |
-| `prx rm <domain>` | Remove a domain reservation and project service block when applicable. | human / JSON |
-| `prx rm --project [name]` | Remove project reservations. | human / JSON |
-| `prx prune` | Remove reservations whose owning config no longer exists. | human / JSON |
-| `prx run <service> -- <cmd>` | Run a child command with `PORT` injected. | child stdio |
-| `prx daemon start|stop|restart|status|logs` | Manage the resident proxy. | human / JSON where applicable |
-| `prx trust` | Install the local root CA into trust stores. | human / JSON |
-| `prx ca export` | Export the local root certificate. | human |
-| `prx expose <service> --via <provider>` | Expose a project service through a provider. | human / JSON |
-| `prx completion <shell>` | Print shell completion. | script |
-| `prx upgrade` | Upgrade to the latest release. | human |
-| `prx skill path|print` | Locate or print the bundled agent skill. | human |
+| `gate init` | Scaffold a starter `gate.toml`. | human |
+| `gate up [-d]` | Reserve ports, reflect DNS, activate routes, optionally start daemon. | human / JSON |
+| `gate down` | Deactivate current project routes and preserve reservations. | human / JSON |
+| `gate ls [-a] [--status live|down]` | List reservations and liveness. | human / JSON |
+| `gate port [service]` | Print one port or list reserved ports. | human / JSON |
+| `gate add <domain> <port>` | Add a project service or standalone reservation. | human / JSON |
+| `gate rm <domain>` | Remove a domain reservation and project service block when applicable. | human / JSON |
+| `gate rm --project [name]` | Remove project reservations. | human / JSON |
+| `gate prune` | Remove reservations whose owning config no longer exists. | human / JSON |
+| `gate run <service> -- <cmd>` | Run a child command with `PORT` injected. | child stdio |
+| `gate daemon start|stop|restart|status|logs` | Manage the resident proxy. | human / JSON where applicable |
+| `gate trust` | Install the local root CA into trust stores. | human / JSON |
+| `gate ca export` | Export the local root certificate. | human |
+| `gate expose <service> --via <provider>` | Expose a project service through a provider. | human / JSON |
+| `gate completion <shell>` | Print shell completion. | script |
+| `gate upgrade` | Upgrade to the latest release. | human |
+| `gate skill path|print` | Locate or print the bundled agent skill. | human |
 
 Exit codes:
 
@@ -472,11 +472,11 @@ flowchart LR
 | Provider | Scope | Requirements | Notes |
 | --- | --- | --- | --- |
 | `local` | Same machine | active route | No external exposure. |
-| `lan` | Same network | `.local` domain, reachable machine, trusted CA on clients | prx validates and marks the route exposed; it does not configure other devices' DNS. |
+| `lan` | Same network | `.local` domain, reachable machine, trusted CA on clients | gate validates and marks the route exposed; it does not configure other devices' DNS. |
 | `cloudflared` | Public temporary URL | `cloudflared` in `PATH` | Prefer `--auth user:pass`; quick tunnel URL is temporary. |
 | `tailscale` | Tailnet | logged-in `tailscale` in `PATH` | Uses Tailscale Serve; detailed teardown is handled with Tailscale commands. |
 
-`prx expose` currently targets project services, not standalone domains.
+`gate expose` currently targets project services, not standalone domains.
 
 Security rule: exposing a route is the only way non-loopback clients can pass
 the proxy's loopback guard.
@@ -488,7 +488,7 @@ the proxy's loopback guard.
 ```mermaid
 flowchart TB
     user["User shell"]
-    prx["prx CLI"]
+    gate["gate CLI"]
     privileged{"privileged operation?"}
     normal["normal user operation"]
     sudo["OS approval / sudo path"]
@@ -496,13 +496,13 @@ flowchart TB
     trust["OS/browser trust store"]
     key["local root CA key<br/>0600 under private data dir"]
 
-    user --> prx
-    prx --> privileged
+    user --> gate
+    gate --> privileged
     privileged -->|"no"| normal
     privileged -->|"yes"| sudo
     sudo --> hosts
     sudo --> trust
-    prx --> key
+    gate --> key
 ```
 
 Privileged operations:
@@ -510,7 +510,7 @@ Privileged operations:
 | Operation | Why permission can be needed | Guardrail |
 | --- | --- | --- |
 | Trusting root CA | OS/browser trust stores are protected | Trust-store integration is isolated behind seams and uses OS-native mechanisms. |
-| Editing `/etc/hosts` | System file | prx edits only its managed block and validates target ownership/symlink state. |
+| Editing `/etc/hosts` | System file | gate edits only its managed block and validates target ownership/symlink state. |
 | Binding low ports | `:443` and `:80` can require privileges on some systems | Daemon/service manager owns the listener process. |
 
 Other security properties:
@@ -520,7 +520,7 @@ Other security properties:
 - Non-loopback clients are blocked unless a route is explicitly exposed.
 - Basic auth uses constant-time comparison when configured on an exposed route.
 - `internal/truststore` is a vendored, self-contained library and must not import
-  prx packages.
+  gate packages.
 
 ---
 
@@ -542,7 +542,7 @@ flowchart TB
     logx["internal/logx"]
     ui["internal/ui"]
     cli["internal/cli"]
-    main["cmd/prx"]
+    main["cmd/gate"]
 
     paths --> config
     paths --> registry
@@ -563,16 +563,16 @@ flowchart TB
 
 | Package | Responsibility |
 | --- | --- |
-| `cmd/prx` | Entrypoint, cobra root command, subcommand dispatch, top-level usage. |
+| `cmd/gate` | Entrypoint, cobra root command, subcommand dispatch, top-level usage. |
 | `internal/cli` | Command parsing, command orchestration, human/JSON output, exit codes. |
 | `internal/ui` | TTY-only styling helpers. Presentation tier only. |
 | `internal/paths` | XDG/macOS config, data, state, and runtime path resolution. |
-| `internal/config` | `prx.toml` discovery, parsing, validation, env interpolation, surgical editing. |
+| `internal/config` | `gate.toml` discovery, parsing, validation, env interpolation, surgical editing. |
 | `internal/registry` | Registry schema, conflict checks, file locking, atomic persistence. |
 | `internal/port` | Port allocation, liveness checks, `PORT` env injection, child process run behavior. |
 | `internal/dns` | DNS mode selection, `.localhost` no-op, hosts-file provider. |
 | `internal/ca` | Root CA creation, leaf issuance, trust/export commands. |
-| `internal/truststore` | Vendored trust-store implementation. Self-contained, no prx imports. |
+| `internal/truststore` | Vendored trust-store implementation. Self-contained, no gate imports. |
 | `internal/tlsprov` | TLS provider abstraction, internal CA provider, ACME/DNS-01 flow. |
 | `internal/proxy` | Host-routing reverse proxy, TLS termination hooks, route hot reload. |
 | `internal/daemon` | Resident process, admin socket API, lifecycle status. |
@@ -585,7 +585,7 @@ Dependency policy:
 | --- | --- |
 | Core data plane and security packages | Prefer stdlib and `golang.org/x`; avoid presentation dependencies. |
 | Presentation and CLI packages | May use small, targeted libraries such as `cobra`, `go-toml`, and `lipgloss`. |
-| Vendored trust-store code | Must stay self-contained and receive prx-specific behavior through generic seams. |
+| Vendored trust-store code | Must stay self-contained and receive gate-specific behavior through generic seams. |
 
 ---
 
@@ -595,7 +595,7 @@ The project command runner is `just`.
 
 | Recipe | Purpose |
 | --- | --- |
-| `just build` | Build `bin/prx`. |
+| `just build` | Build `bin/gate`. |
 | `just test` | Run `go test -race ./...`. |
 | `just lint-json` | Emit structured lint diagnostics on stdout and human text on stderr. |
 | `just lint` | Run human lint output. |
@@ -611,7 +611,7 @@ Validation priorities:
   streaming, and redirects.
 - Trust/hosts privileged paths tested through fakes rather than mutating the
   developer or CI machine.
-- `internal/truststore` domain separation: no imports from `prx/internal/...`.
+- `internal/truststore` domain separation: no imports from `gate/internal/...`.
 
 ---
 

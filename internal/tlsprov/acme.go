@@ -17,7 +17,7 @@ import (
 	"sync"
 	"time"
 
-	"prx/internal/fsutil"
+	"gate/internal/fsutil"
 
 	"golang.org/x/crypto/acme"
 )
@@ -65,7 +65,7 @@ func (a *ACME) GetCertificate(hello *tls.ClientHelloInfo) (*tls.Certificate, err
 	defer a.mu.RUnlock()
 	cert, ok := a.cache[name]
 	if !ok {
-		return nil, fmt.Errorf("acme: no certificate for %q (run prx up)", name)
+		return nil, fmt.Errorf("acme: no certificate for %q (run gate up)", name)
 	}
 	return cert, nil
 }

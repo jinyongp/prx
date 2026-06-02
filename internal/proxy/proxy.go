@@ -1,4 +1,4 @@
-// Package proxy is prx's data plane: a host-routing reverse proxy that
+// Package proxy is gate's data plane: a host-routing reverse proxy that
 // terminates TLS, forwards to local dev servers, and reloads its route table
 // without dropping connections.
 package proxy
@@ -120,7 +120,7 @@ func (s *Server) HTTPSHandler() http.Handler {
 			return
 		}
 		if route.Auth != "" && !basicAuthOK(r, route.Auth) {
-			w.Header().Set("WWW-Authenticate", `Basic realm="prx"`)
+			w.Header().Set("WWW-Authenticate", `Basic realm="gate"`)
 			http.Error(w, "401 Unauthorized", http.StatusUnauthorized)
 			return
 		}
@@ -144,7 +144,7 @@ func (s *Server) HTTPHandler() http.Handler {
 func writeNotRunning(w http.ResponseWriter, host string) {
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.WriteHeader(http.StatusBadGateway)
-	fmt.Fprintf(w, "502 Bad Gateway\n\nprx: no dev server running for %s\n", host)
+	fmt.Fprintf(w, "502 Bad Gateway\n\ngate: no dev server running for %s\n", host)
 }
 
 func writeBadGateway(w http.ResponseWriter) {

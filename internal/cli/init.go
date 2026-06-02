@@ -10,20 +10,20 @@ import (
 	"strconv"
 	"strings"
 
-	"prx/internal/config"
-	"prx/internal/ui"
+	"gate/internal/config"
+	"gate/internal/ui"
 
 	"golang.org/x/term"
 )
 
-// Init scaffolds a starter prx.toml in the current directory.
+// Init scaffolds a starter gate.toml in the current directory.
 func Init(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("init", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	force := fs.Bool("force", false, "overwrite an existing prx.toml")
+	force := fs.Bool("force", false, "overwrite an existing gate.toml")
 	name := fs.String("name", "", "project name (default: current directory name)")
-	yes := fs.Bool("yes", false, "create a default prx.toml without prompts")
-	fs.BoolVar(yes, "y", false, "create a default prx.toml without prompts")
+	yes := fs.Bool("yes", false, "create a default gate.toml without prompts")
+	fs.BoolVar(yes, "y", false, "create a default gate.toml without prompts")
 	if handled, code := parseFlags(fs, "init", args, stdout, stderr); handled {
 		return code
 	}
@@ -38,13 +38,13 @@ func Init(args []string, stdout, stderr io.Writer) int {
 
 	path := filepath.Join(cwd, config.Filename)
 	if _, err := os.Stat(path); err == nil && !*force {
-		return fail(stderr, *jsonOut, ExitError, "exists", "prx.toml already exists (use --force to overwrite)")
+		return fail(stderr, *jsonOut, ExitError, "exists", "gate.toml already exists (use --force to overwrite)")
 	}
 
 	spec := defaultInitSpec(*name)
 	if !*yes {
 		if !stdinIsTerminal() {
-			return fail(stderr, *jsonOut, ExitUsage, "interactive_required", "run `prx init -y` to create a default config non-interactively")
+			return fail(stderr, *jsonOut, ExitUsage, "interactive_required", "run `gate init -y` to create a default config non-interactively")
 		}
 		spec, err = promptInitSpec(stdout, *name)
 		if err != nil {
@@ -73,7 +73,7 @@ func Init(args []string, stdout, stderr io.Writer) int {
 			fmt.Fprintf(stdout, "  service: %s -> %s (:%d)\n", svc.Name, svc.Domain, svc.Port)
 		}
 	}
-	fmt.Fprintln(stderr, "next: run `prx up -d`")
+	fmt.Fprintln(stderr, "next: run `gate up -d`")
 	return ExitOK
 }
 

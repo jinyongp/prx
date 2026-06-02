@@ -32,7 +32,7 @@ cleanup() {
 trap cleanup EXIT
 
 ACTION="$action" perl -0pe '
-  my $tag = "prx:hello-js-custom-hosts";
+  my $tag = "gate:hello-js-custom-hosts";
   my $domain = "hello-js.test";
 
   sub remove_managed_blocks {

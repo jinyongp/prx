@@ -9,4 +9,4 @@ if [ -z "$version" ]; then
 fi
 
 echo "version=${version}" >> "$GITHUB_OUTPUT"
-scripts/release/build-prx.sh "$version"
+scripts/release/build-gate.sh "$version"

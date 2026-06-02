@@ -1,4 +1,4 @@
-prx vendors this package from:
+gate vendors this package from:
 
     github.com/smallstep/truststore  v0.13.0
     https://github.com/smallstep/truststore
@@ -6,16 +6,16 @@ prx vendors this package from:
 Licensed under the Apache License, Version 2.0 (see LICENSE). The upstream code
 itself derives from the mkcert project (https://github.com/FiloSottile/mkcert).
 
-Modifications made in prx (this internal copy):
+Modifications made in gate (this internal copy):
 
   - Removed platform support outside macOS and Linux: dropped
     truststore_windows.go, truststore_freebsd.go and truststore_others.go.
   - Removed Java keystore support: dropped truststore_java.go and the WithJava
-    option (prx targets browsers/OS trust only).
+    option (gate targets browsers/OS trust only).
   - Added WithLogger(*log.Logger) to route debug output to a caller-supplied
-    logger. This is a generic seam; the package still imports nothing from prx.
+    logger. This is a generic seam; the package still imports nothing from gate.
   - Fixed two debug(err.Error()) calls to use a constant format string
     (debug("%s", err.Error())) so `go vet` passes.
 
 The package remains self-contained (standard library + howett.net/plist on
-macOS) and does not import any prx code.
+macOS) and does not import any gate code.

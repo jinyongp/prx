@@ -6,7 +6,7 @@ import (
 	"context"
 	"crypto/tls"
 
-	"prx/internal/ca"
+	"gate/internal/ca"
 )
 
 // Provider supplies certificates for the TLS server.

@@ -1,4 +1,4 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-go run ./cmd/prx "$@"
+go run ./cmd/gate "$@"

@@ -15,7 +15,7 @@ func main() {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
-		fmt.Fprintf(w, "hello from prx sample\nhost: %s\ntime: %s\n", r.Host, time.Now().Format(time.RFC3339))
+		fmt.Fprintf(w, "hello from gate sample\nhost: %s\ntime: %s\n", r.Host, time.Now().Format(time.RFC3339))
 	})
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "text/plain; charset=utf-8")
