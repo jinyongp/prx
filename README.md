@@ -8,6 +8,14 @@ Local HTTPS reverse proxy and port registry for local development.
 
 ## Install
 
+Using Homebrew:
+
+```bash
+brew install jinyongp/tap/gate
+```
+
+Or using the install script:
+
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/install.sh | sh
 ```
@@ -15,14 +23,23 @@ curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/install.
 Supported platforms: macOS and Linux (darwin, linux) on arm64 and amd64.
 
 > [!TIP]
-> The installer writes `gate` to `~/.local/bin` by default. If that directory is
-> not in `PATH`, the installer offers to update your shell startup file and also
-> prints the exact line you can add manually.
+> The install script writes `gate` to `~/.local/bin` by default. If that
+> directory is not in `PATH`, the installer offers to update your shell startup
+> file and also prints the exact line you can add manually.
 
 For full usage, see [docs/usage.md](docs/usage.md). For detailed setup notes
 and internals, see [docs/spec.md](docs/spec.md).
 
 ## Upgrade
+
+Using Homebrew:
+
+```bash
+brew update
+brew upgrade gate
+```
+
+Or using gate's built-in upgrade command:
 
 ```bash
 gate upgrade
