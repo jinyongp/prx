@@ -225,10 +225,12 @@ just vuln
 Local smoke tests are available for contributors:
 
 ```bash
-just hello-go-port
-just hello-js-port
+just smoke check
+just smoke serve
+just smoke route
 ```
 
-Those recipes build the local `bin/gate` binary from this checkout and run
-sample apps through gate on random front-proxy ports. For full command usage, see
+Those smoke recipes build the local `bin/gate` binary from this checkout, run
+the sample app through gate on random front-proxy ports, and clean up their
+temporary gate state when they exit. For full command usage, see
 [docs/usage.md](docs/usage.md).

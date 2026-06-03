@@ -1,0 +1,6 @@
+[project]
+name = "smoke"
+
+[services.web]
+domain = "smoke.localhost"
+port = "${SMOKE_PORT:-4300}"

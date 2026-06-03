@@ -1,4 +1,4 @@
-# hello-go
+# smoke app
 
 Tiny HTTP server for testing gate locally.
 
@@ -7,16 +7,19 @@ Tiny HTTP server for testing gate locally.
 From the repository root:
 
 ```bash
-just hello-go
+just smoke serve
 ```
 
-Then open:
+The recipe prints the local HTTPS URL after gate starts. It uses a temporary
+upstream port through `SMOKE_PORT`, then gate injects that port into the
+sample server. Use `Ctrl-C` to stop the sample server; cleanup runs
+automatically.
 
-```text
-https://hello-go.localhost
+For a non-interactive smoke check:
+
+```bash
+just smoke check
 ```
-
-Use `Ctrl-C` to stop the sample server.
 
 The first browser visit may show `ERR_CERT_AUTHORITY_INVALID`. That means the local gate CA is not trusted yet. For smoke testing, use the browser's advanced/proceed flow.
 
@@ -27,11 +30,3 @@ bin/gate trust
 ```
 
 Run it from the repository root. It may ask for administrator approval.
-
-## Direct Run
-
-```bash
-go run .
-```
-
-The server listens on `127.0.0.1:4300` by default.

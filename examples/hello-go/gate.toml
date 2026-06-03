@@ -1,6 +1,0 @@
-[project]
-name = "hello-go"
-
-[services.web]
-domain = "hello-go.localhost"
-port = 4300
