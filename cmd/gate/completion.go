@@ -1,0 +1,236 @@
+package main
+
+import (
+	"strings"
+
+	"gate/internal/cli"
+
+	"github.com/spf13/cobra"
+)
+
+func configureCompletions(root *cobra.Command) {
+	for _, spec := range completionSpecs() {
+		if cmd := findDirectCommand(root, spec.Command); cmd != nil {
+			applyCompletionSpec(cmd, spec, spec.Command, nil)
+		}
+	}
+
+	root.InitDefaultCompletionCmd()
+	if completionCmd, _, err := root.Find([]string{"completion"}); err == nil {
+		for _, sub := range completionCmd.Commands() {
+			if sub.Name() == "powershell" {
+				completionCmd.RemoveCommand(sub)
+			}
+		}
+		completionCmd.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
+			cli.WriteHelp(cmd.OutOrStdout(), "completion", commandArgs("completion"), commandSummary("completion"), nil)
+		})
+	}
+}
+
+func applyCompletionSpec(cmd *cobra.Command, spec completionSpec, dispatchName string, dispatchPrefix []string) {
+	for _, group := range spec.FlagGroups {
+		for _, flag := range completionFlagGroupSpecs(group) {
+			addCompletionFlag(cmd, flag)
+		}
+	}
+	for _, flag := range spec.Flags {
+		addCompletionFlag(cmd, flag)
+	}
+	if spec.Args != nil || spec.DisableFileCompletion || spec.StopAfterDashDash {
+		cmd.ValidArgsFunction = completionArgsFunction(spec)
+	}
+	for _, childSpec := range spec.Children {
+		child := findDirectCommand(cmd, childSpec.Command)
+		if child == nil {
+			child = completionChildCommand(childSpec.Command, dispatchName, append(dispatchPrefix, childSpec.Command))
+			cmd.AddCommand(child)
+		}
+		applyCompletionSpec(child, childSpec, dispatchName, append(dispatchPrefix, childSpec.Command))
+	}
+}
+
+func completionArgsFunction(spec completionSpec) cobra.CompletionFunc {
+	return func(cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective) {
+		if spec.StopAfterDashDash && containsDashDash(args) {
+			return nil, cobra.ShellCompDirectiveDefault
+		}
+		if values, directive, ok := completePendingFlagValue(spec, cmd, args, toComplete); ok {
+			return values, directive
+		}
+		if spec.Args == nil {
+			if spec.DisableFileCompletion {
+				return nil, cobra.ShellCompDirectiveNoFileComp
+			}
+			return nil, cobra.ShellCompDirectiveDefault
+		}
+		ctx := newCompletionContext(cmd, args, toComplete)
+		values := filterCompletionValues(spec.Args(ctx), toComplete)
+		directive := cobra.ShellCompDirectiveDefault
+		if spec.DisableFileCompletion {
+			directive = cobra.ShellCompDirectiveNoFileComp
+		}
+		return values, directive
+	}
+}
+
+func completePendingFlagValue(spec completionSpec, cmd *cobra.Command, args []string, toComplete string) ([]string, cobra.ShellCompDirective, bool) {
+	name, valuePrefix, contextArgs, ok := pendingFlagValueCandidate(args, toComplete)
+	if !ok {
+		return nil, cobra.ShellCompDirectiveDefault, false
+	}
+	for _, flag := range expandedCompletionFlags(spec) {
+		if flag.Name != name && flag.Short != name {
+			continue
+		}
+		if flag.Kind != completionFlagString {
+			return nil, cobra.ShellCompDirectiveDefault, false
+		}
+		if flag.Files {
+			return nil, cobra.ShellCompDirectiveDefault, true
+		}
+		if flag.Complete != nil {
+			ctx := newCompletionContext(cmd, contextArgs, valuePrefix)
+			return filterCompletionValues(flag.Complete(ctx), valuePrefix), cobra.ShellCompDirectiveNoFileComp, true
+		}
+		return nil, cobra.ShellCompDirectiveNoFileComp, true
+	}
+	return nil, cobra.ShellCompDirectiveDefault, false
+}
+
+func pendingFlagValueCandidate(args []string, toComplete string) (string, string, []string, bool) {
+	if len(args) > 0 {
+		name, valuePrefix, ok := pendingFlagValue(args[len(args)-1], toComplete)
+		if ok {
+			return name, valuePrefix, args[:len(args)-1], true
+		}
+	}
+	if strings.HasPrefix(toComplete, "-") && strings.Contains(toComplete, "=") {
+		name, valuePrefix, ok := pendingFlagValue(toComplete, toComplete)
+		if ok {
+			return name, valuePrefix, args, true
+		}
+	}
+	return "", "", nil, false
+}
+
+func pendingFlagValue(arg string, toComplete string) (string, string, bool) {
+	if !strings.HasPrefix(arg, "-") || arg == "-" {
+		return "", "", false
+	}
+	name, value, hasValue := strings.Cut(strings.TrimLeft(arg, "-"), "=")
+	if name == "" {
+		return "", "", false
+	}
+	if hasValue {
+		return name, value, true
+	}
+	return name, toComplete, true
+}
+
+func expandedCompletionFlags(spec completionSpec) []completionFlagSpec {
+	var out []completionFlagSpec
+	for _, group := range spec.FlagGroups {
+		out = append(out, completionFlagGroupSpecs(group)...)
+	}
+	out = append(out, spec.Flags...)
+	return out
+}
+
+func completionChildCommand(name, dispatchName string, dispatchPrefix []string) *cobra.Command {
+	return &cobra.Command{
+		Use:                name,
+		Short:              commandSummary(dispatchName),
+		Args:               cobra.ArbitraryArgs,
+		DisableFlagParsing: true,
+		SilenceUsage:       true,
+		SilenceErrors:      true,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			fn := commands[dispatchName]
+			code := fn(append(append([]string{}, dispatchPrefix...), args...), cmd.OutOrStdout(), cmd.ErrOrStderr())
+			if code == 0 {
+				return nil
+			}
+			return exitCodeError{code: code}
+		},
+	}
+}
+
+func completionFlagGroupSpecs(group completionFlagGroup) []completionFlagSpec {
+	switch group {
+	case flagsHelp:
+		return []completionFlagSpec{boolFlag("help", "h", "help for this command")}
+	case flagsJSON:
+		return []completionFlagSpec{boolFlag("json", "", "emit JSON")}
+	case flagsScope:
+		return []completionFlagSpec{
+			boolFlag("global", "g", "target the global daemon"),
+			stringFlag("project", "p", "target a project daemon", completeProjects),
+		}
+	case flagsScopeAll:
+		return []completionFlagSpec{
+			boolFlag("global", "g", "target the global daemon"),
+			stringFlag("project", "p", "target a project daemon", completeProjects),
+			boolFlag("all", "a", "target all known daemons"),
+		}
+	case flagsYes:
+		return []completionFlagSpec{boolFlag("yes", "y", "skip confirmation")}
+	case flagsDaemonListen:
+		return []completionFlagSpec{
+			noValueFlag("http-addr", "", "daemon HTTP listen address"),
+			noValueFlag("https-addr", "", "daemon HTTPS listen address"),
+		}
+	default:
+		return nil
+	}
+}
+
+func addCompletionFlag(cmd *cobra.Command, spec completionFlagSpec) {
+	if spec.Name == "" || cmd.Flags().Lookup(spec.Name) != nil {
+		return
+	}
+	switch spec.Kind {
+	case completionFlagString:
+		if spec.Short != "" {
+			cmd.Flags().StringP(spec.Name, spec.Short, "", spec.Usage)
+		} else {
+			cmd.Flags().String(spec.Name, "", spec.Usage)
+		}
+	case completionFlagBool:
+		if spec.Short != "" {
+			cmd.Flags().BoolP(spec.Name, spec.Short, false, spec.Usage)
+		} else {
+			cmd.Flags().Bool(spec.Name, false, spec.Usage)
+		}
+	}
+	if spec.Files {
+		return
+	}
+	if spec.Complete != nil {
+		_ = cmd.RegisterFlagCompletionFunc(spec.Name, completeFunc(spec.Complete))
+		return
+	}
+	if spec.Kind == completionFlagString || spec.NoValues {
+		_ = cmd.RegisterFlagCompletionFunc(spec.Name, func(*cobra.Command, []string, string) ([]string, cobra.ShellCompDirective) {
+			return nil, cobra.ShellCompDirectiveNoFileComp
+		})
+	}
+}
+
+func findDirectCommand(parent *cobra.Command, name string) *cobra.Command {
+	for _, cmd := range parent.Commands() {
+		if cmd.Name() == name {
+			return cmd
+		}
+	}
+	return nil
+}
+
+func containsDashDash(args []string) bool {
+	for _, arg := range args {
+		if arg == "--" {
+			return true
+		}
+	}
+	return false
+}

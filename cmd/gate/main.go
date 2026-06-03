@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strings"
 	"text/tabwriter"
 
@@ -100,7 +101,8 @@ func run(args []string, stdout, stderr io.Writer) int {
 		return defaultUsage(cmd)
 	})
 
-	for name, commandFn := range commands {
+	for _, name := range cobraCommandNames() {
+		commandFn := commands[name]
 		sub := &cobra.Command{
 			Use:                name,
 			Short:              commandSummary(name),
@@ -120,20 +122,7 @@ func run(args []string, stdout, stderr io.Writer) int {
 		root.AddCommand(sub)
 	}
 
-	// gate targets Unix only, so drop powershell from the generated completion
-	// command to avoid advertising an unsupported shell. Render its help in the
-	// same style as every other subcommand so the whole CLI surface is uniform.
-	root.InitDefaultCompletionCmd()
-	if completionCmd, _, err := root.Find([]string{"completion"}); err == nil {
-		for _, sub := range completionCmd.Commands() {
-			if sub.Name() == "powershell" {
-				completionCmd.RemoveCommand(sub)
-			}
-		}
-		completionCmd.SetHelpFunc(func(cmd *cobra.Command, _ []string) {
-			cli.WriteHelp(cmd.OutOrStdout(), "completion", commandArgs("completion"), commandSummary("completion"), nil)
-		})
-	}
+	configureCompletions(root)
 
 	if err := root.Execute(); err != nil {
 		var codeErr exitCodeError
@@ -146,6 +135,25 @@ func run(args []string, stdout, stderr io.Writer) int {
 	}
 
 	return 0
+}
+
+func cobraCommandNames() []string {
+	seen := map[string]bool{}
+	names := make([]string, 0, len(commands))
+	for _, spec := range cli.Specs {
+		if _, ok := commands[spec.Name]; ok {
+			names = append(names, spec.Name)
+			seen[spec.Name] = true
+		}
+	}
+	var extra []string
+	for name := range commands {
+		if !seen[name] {
+			extra = append(extra, name)
+		}
+	}
+	sort.Strings(extra)
+	return append(names, extra...)
 }
 
 // commandSummary returns a subcommand's one-line summary from cli.Specs, the

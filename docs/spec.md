@@ -451,9 +451,9 @@ daemon conflicts only when the new process cannot bind the requested address.
 | `gate trust` | Install the local root CA into trust stores. | text |
 | `gate untrust` | Remove the local root CA from trust stores. | text |
 | `gate uninstall [-y\|--yes] [--keep-trust] [--keep-brew]` | Remove gate state, binaries, and Homebrew package when applicable. | text |
-| `gate ca export` | Export the local root certificate. | text |
+| `gate ca export [--out path]` | Export the local root certificate. | text |
 | `gate expose [-g\|--global] [-p name\|--project name] <service> --via <provider> [--auth user:pass]` | Expose a scoped service/name through a provider. | text / json |
-| `gate completion <shell>` | Print shell completion. | script |
+| `gate completion bash\|zsh\|fish` | Print shell completion. | script |
 | `gate upgrade [-y\|--yes]` | Upgrade to the latest release. | text |
 | `gate skill path\|print` | Locate or print the bundled agent skill. | text |
 
@@ -462,6 +462,45 @@ the current project when a `gate.toml` is discoverable; otherwise they use the
 global scope. `gate rm <service>` edits the current project's `gate.toml` when
 the default current-project scope is selected. `gate clear` removes registry,
 route, and DNS state only; it does not edit project config files.
+
+### Shell Completion
+
+`gate completion bash|zsh|fish` prints shell completion scripts. Completion is
+read-only: it may read the registry, current project config, and known project
+config paths, but it must not start daemons, modify DNS, trust certificates, or
+write files. Missing or invalid local state yields no candidates rather than
+shell-visible errors. Candidates are stable-sorted.
+
+Completion mirrors the command surface:
+
+- root commands come from public command specs; hidden/internal commands are not
+  advertised
+- `daemon` completes `start`, `stop`, `restart`, `status`, and `logs`
+- `ca` completes `export`; `skill` completes `path` and `print`
+- `completion` completes `bash`, `zsh`, and `fish`
+- `--<tab>` completes long flags for the current command/subcommand; `-<tab>`
+  completes short flags; `-h|--help` are common help candidates
+
+Dynamic candidates:
+
+- `--project` completes project names from the local registry
+- scoped service/name positionals complete current-project services by default
+  inside a project, global reservation names outside a project, global names
+  with `-g|--global`, and known services for a named project with
+  `-p|--project`
+- named-project service completion includes registry services and services from
+  a known local `gate.toml` config path
+
+Static flag-value candidates:
+
+- `ls --status`: `live`, `down`
+- `up --dns`: `localhost`, `hosts`
+- `expose --via`: `local`, `lan`, `cloudflared`, `tailscale`
+
+File completion is disabled for registry service/name positionals so local file
+names are not mixed with registry candidates. `ca export --out` keeps normal
+file path completion. `gate run <service> --` stops completing gate arguments
+after `--`; the rest belongs to the child command.
 
 Registry removal selects reservations by service/name in the chosen scope.
 

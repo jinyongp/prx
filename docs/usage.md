@@ -585,6 +585,31 @@ gate completion zsh
 gate completion fish
 ```
 
+Completion is read-only. It reads local registry state and nearby `gate.toml`
+files when available, but it does not start daemons, edit DNS, trust
+certificates, or write project/config files. Broken or missing local state
+returns no candidates instead of noisy shell errors. Candidates are
+stable-sorted.
+
+Installed completion offers:
+
+- command/action candidates: root commands, `daemon start|stop|restart|status|logs`,
+  `ca export`, `skill path|print`, and `completion bash|zsh|fish`
+- flag candidates: `--<tab>` shows long flags and `-<tab>` shows short flags for
+  the current command or subcommand, including common `-h|--help`
+- scope candidates: `-g|--global`, `-p|--project`, and `-a|--all` where that
+  command supports them; `--project <tab>` lists registry project names
+- service/name candidates: scoped service names for `add`, `rm`, `run`, `port`,
+  and `expose`; inside a project the default scope is the current project,
+  outside a project it is global
+- enum values: `ls --status` completes `live|down`, `up --dns` completes
+  `localhost|hosts`, and `expose --via` completes
+  `local|lan|cloudflared|tailscale`
+- file paths only where meaningful, such as `ca export --out`
+
+Completion stops offering gate arguments after `gate run <service> --`, because
+everything after `--` belongs to the child command.
+
 ## Uninstall
 
 Remove gate's local state, trust entry, managed hosts/PATH blocks, and known

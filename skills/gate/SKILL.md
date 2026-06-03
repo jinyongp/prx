@@ -63,6 +63,7 @@ fi
 | `gate ca export [--out path]` | export the root CA for other devices |
 | `gate expose [-g\|--global] [-p name\|--project name] <service> --via <provider> [--auth user:pass] [--json]` | reach a scoped service externally |
 | `gate upgrade [-y\|--yes]` | upgrade to the latest GitHub release |
+| `gate completion bash\|zsh\|fish` | print shell completion script |
 | `gate skill path\|print` | locate or print this skill file |
 
 ## Exit codes
@@ -153,3 +154,16 @@ reservations are served by the global daemon. If the relevant daemon is running,
 it starts the global daemon. Use `gate daemon status --all` to inspect all known
 daemon scopes. Outside a project, `gate port <name>` and
 `gate run <name> -- ...` resolve global reservations by name.
+
+Shell completion is read-only, local-state aware, quiet on missing/broken local
+state, and stable-sorted. It completes root commands,
+`daemon start|stop|restart|status|logs`, `ca export`, `skill path|print`, and
+`completion bash|zsh|fish`. `--<tab>` shows long flags and `-<tab>` shows short
+flags for the current command/subcommand. `--project` completes registry
+project names. Scoped service/name arguments for `add`, `rm`, `run`, `port`,
+and `expose` complete current-project services inside a project, global
+reservation names outside a project, global names with `-g|--global`, and known
+named-project services with `-p|--project`. Enum completions include
+`ls --status` (`live|down`), `up --dns` (`localhost|hosts`), and
+`expose --via` (`local|lan|cloudflared|tailscale`). `ca export --out` keeps
+file path completion; service/name positionals do not mix in local file names.
