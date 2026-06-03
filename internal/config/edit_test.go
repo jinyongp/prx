@@ -57,6 +57,44 @@ func TestAddServiceRejectsDuplicate(t *testing.T) {
 	}
 }
 
+func TestUpsertServicePreservesServiceCommentsAndExtraFields(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, Filename)
+	body := `# top
+[project]
+name = "myapp"
+
+[services.web]
+# keep service comment
+domain = "old.example.com" # old inline
+port = "${WEB_PORT:-3000}"
+tls = "acme"
+acme_dns = "cloudflare"
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertService(path, "web", Service{Domain: "new.example.com", Port: 4312}); err != nil {
+		t.Fatalf("UpsertService: %v", err)
+	}
+	out, _ := os.ReadFile(path)
+	s := string(out)
+	for _, want := range []string{
+		"# keep service comment",
+		`domain = "new.example.com"`,
+		"port = 4312",
+		`tls = "acme"`,
+		`acme_dns = "cloudflare"`,
+	} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("output missing %q:\n%s", want, s)
+		}
+	}
+	if _, err := Load(path); err != nil {
+		t.Fatalf("reparse: %v\n%s", err, s)
+	}
+}
+
 func TestRemoveServiceKeepsOthers(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, Filename)

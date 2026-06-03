@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"errors"
 	"flag"
 	"fmt"
@@ -20,13 +21,14 @@ import (
 
 // service is one row of `gate ls` output.
 type service struct {
-	Project string `json:"project"`
-	Service string `json:"service"`
-	Domain  string `json:"domain"`
-	Port    int    `json:"port"`
-	TLS     string `json:"tls"`
-	DNS     string `json:"dns,omitempty"`
-	Status  string `json:"status"`
+	Project    string `json:"project"`
+	Service    string `json:"service"`
+	Domain     string `json:"domain"`
+	Port       int    `json:"port"`
+	TLS        string `json:"tls"`
+	DNS        string `json:"dns,omitempty"`
+	Status     string `json:"status"`
+	Standalone bool   `json:"standalone,omitempty"`
 }
 
 type projectReservation struct {
@@ -52,6 +54,7 @@ type reservationLookupError struct {
 var (
 	selectDNSProvider   = dns.Select
 	setDaemonRoutesFunc = setDaemonRoutes
+	stdinIsTTYFunc      = stdinIsTTY
 )
 
 func liveness(p int) string {
@@ -94,11 +97,14 @@ func currentProject() (*config.Project, error) {
 func Ls(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("ls", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	all := fs.Bool("all", false, "show reservations from all projects")
-	fs.BoolVar(all, "a", false, "show reservations from all projects")
+	scopeFlags := defineDaemonScopeFlags(fs, true)
 	status := fs.String("status", "", "filter by status: live|down")
 	if handled, code := parseFlags(fs, "ls", args, stdout, stderr); handled {
 		return code
+	}
+	sel, err := registryScopeFromFlags(scopeFlags, true)
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitUsage, "bad_scope", err.Error())
 	}
 	if *status != "" && *status != "live" && *status != "down" {
 		return fail(stderr, *jsonOut, ExitUsage, "bad_status", "status must be live or down")
@@ -109,19 +115,10 @@ func Ls(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, *jsonOut, ExitError, "registry_error", err.Error())
 	}
 
-	projectName := ""
-	if !*all {
-		project, err := currentProject()
-		if err != nil {
-			return fail(stderr, *jsonOut, ExitError, "no_project", err.Error())
-		}
-		projectName = project.Name
-	}
-
 	rows := make([]service, 0, len(reg.Services))
 	for _, k := range reg.Keys() {
 		res := reg.Services[k]
-		if !*all && (res.Project != projectName || !res.Active) {
+		if !reservationMatchesScope(res, sel) {
 			continue
 		}
 		rowStatus := reservationStatus(res)
@@ -130,7 +127,7 @@ func Ls(args []string, stdout, stderr io.Writer) int {
 		}
 		rows = append(rows, service{
 			Project: res.Project, Service: res.Service, Domain: res.Domain,
-			Port: res.Port, TLS: res.TLS, DNS: res.DNS, Status: rowStatus,
+			Port: res.Port, TLS: res.TLS, DNS: res.DNS, Status: rowStatus, Standalone: res.Standalone,
 		})
 	}
 
@@ -139,18 +136,18 @@ func Ls(args []string, stdout, stderr io.Writer) int {
 	}
 	if len(rows) == 0 {
 		if richOut(stdout, false) {
-			fmt.Fprintln(stdout, ui.Dim.Render("No reservations yet — run `gate up` in a project or `gate add <domain> <port>`."))
+			fmt.Fprintln(stdout, ui.Dim.Render("No reservations yet — run `gate up` in a project or `gate add <service> <domain> <port>`."))
 		} else {
 			fmt.Fprintln(stdout, "No reservations.")
 		}
 		return ExitOK
 	}
 	if richOut(stdout, false) {
-		headers := []string{"PROJECT", "SERVICE", "DOMAIN", "PORT", "TLS", "STATUS"}
+		headers := []string{"SCOPE", "SERVICE", "DOMAIN", "PORT", "TLS", "STATUS"}
 		data := make([][]string, 0, len(rows))
 		for _, r := range rows {
 			data = append(data, []string{
-				r.Project, r.Service, displayDomainURL(r.Domain), strconv.Itoa(r.Port), r.TLS, statusDot(r.Status, true),
+				displayServiceScope(r), r.Service, displayDomainURL(r.Domain), strconv.Itoa(r.Port), r.TLS, statusDot(r.Status, true),
 			})
 		}
 		fmt.Fprintln(stdout, ui.Render(headers, data))
@@ -158,12 +155,22 @@ func Ls(args []string, stdout, stderr io.Writer) int {
 	}
 	color := isTTY(stdout)
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PROJECT\tSERVICE\tDOMAIN\tPORT\tTLS\tSTATUS")
+	fmt.Fprintln(tw, "SCOPE\tSERVICE\tDOMAIN\tPORT\tTLS\tSTATUS")
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", r.Project, r.Service, displayDomainURL(r.Domain), r.Port, r.TLS, statusDot(r.Status, color))
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%d\t%s\t%s\n", displayServiceScope(r), r.Service, displayDomainURL(r.Domain), r.Port, r.TLS, statusDot(r.Status, color))
 	}
 	_ = tw.Flush()
 	return ExitOK
+}
+
+func displayServiceScope(r service) string {
+	if r.Project != "" {
+		return r.Project
+	}
+	if r.Standalone {
+		return daemonScopeGlobal
+	}
+	return "-"
 }
 
 // Port prints the reserved port for a service, or lists reserved ports when no
@@ -171,20 +178,23 @@ func Ls(args []string, stdout, stderr io.Writer) int {
 func Port(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("port", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	all := fs.Bool("all", false, "show reservations from all projects")
-	fs.BoolVar(all, "a", false, "show reservations from all projects")
+	scopeFlags := defineDaemonScopeFlags(fs, true)
 	if handled, code := parseFlags(fs, "port", args, stdout, stderr); handled {
 		return code
 	}
+	sel, err := registryScopeFromFlags(scopeFlags, true)
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitUsage, "bad_scope", err.Error())
+	}
 	rest := fs.Args()
 	if len(rest) == 0 {
-		return listPorts(stdout, stderr, *jsonOut, *all)
+		return listPorts(stdout, stderr, *jsonOut, sel)
 	}
 	if len(rest) != 1 {
 		return usageFail(stderr, *jsonOut, "port")
 	}
 	svc := rest[0]
-	res, lerr := lookupServiceReservation(svc)
+	res, lerr := lookupScopedReservation(svc, sel)
 	if lerr != nil {
 		return fail(stderr, *jsonOut, lerr.Exit, lerr.Code, lerr.Message)
 	}
@@ -199,71 +209,15 @@ func Port(args []string, stdout, stderr io.Writer) int {
 	return ExitOK
 }
 
-func lookupServiceReservation(svc string) (registry.Reservation, *reservationLookupError) {
-	project, err := currentProject()
-	if err == nil {
-		if _, ok := project.Services[svc]; !ok {
-			return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "no_service", Message: fmt.Sprintf("no service %q in project", svc)}
-		}
-		reg, rerr := registryStore().Read()
-		if rerr != nil {
-			return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "registry_error", Message: rerr.Error()}
-		}
-		res, ok := reg.Get(registry.Key(project.Name, svc))
-		if !ok || res.Port == 0 {
-			return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "not_allocated", Message: "no port allocated; run gate up"}
-		}
-		return res, nil
-	}
-	if !errors.Is(err, config.ErrNotFound) {
-		return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "no_project", Message: err.Error()}
-	}
-
-	reg, rerr := registryStore().Read()
-	if rerr != nil {
-		return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "registry_error", Message: rerr.Error()}
-	}
-	res, ok := standaloneReservation(reg, svc)
-	if !ok || res.Port == 0 {
-		return registry.Reservation{}, &reservationLookupError{Exit: ExitError, Code: "not_allocated", Message: fmt.Sprintf("no standalone port for %q; run gate add <domain> <port>", svc)}
-	}
-	return res, nil
-}
-
-func standaloneReservation(reg *registry.Registry, svc string) (registry.Reservation, bool) {
-	domain := config.CanonicalDomain(svc)
-	if res, ok := reg.Get(registry.Key("", domain)); ok && res.Standalone {
-		return res, true
-	}
-	for _, key := range reg.Keys() {
-		res := reg.Services[key]
-		if !res.Standalone || res.Project != "" {
-			continue
-		}
-		if res.Service == svc || config.CanonicalDomain(res.Service) == domain || config.CanonicalDomain(res.Domain) == domain {
-			return res, true
-		}
-	}
-	return registry.Reservation{}, false
-}
-
-func listPorts(stdout, stderr io.Writer, jsonOut, all bool) int {
+func listPorts(stdout, stderr io.Writer, jsonOut bool, sel registryScopeSelection) int {
 	reg, err := registryStore().Read()
 	if err != nil {
 		return fail(stderr, jsonOut, ExitError, "registry_error", err.Error())
 	}
-	projectName := ""
-	if !all {
-		project, err := currentProject()
-		if err != nil {
-			return fail(stderr, jsonOut, ExitError, "no_project", err.Error())
-		}
-		projectName = project.Name
-	}
 	rows := make([]portRow, 0, len(reg.Services))
 	for _, k := range reg.Keys() {
 		res := reg.Services[k]
-		if !all && res.Project != projectName {
+		if !reservationMatchesScope(res, sel) {
 			continue
 		}
 		if res.Port == 0 {
@@ -283,18 +237,18 @@ func listPorts(stdout, stderr io.Writer, jsonOut, all bool) int {
 	}
 	if len(rows) == 0 {
 		if richOut(stdout, false) {
-			fmt.Fprintln(stdout, ui.Dim.Render("No reserved ports yet — run `gate up` in a project or `gate add <domain> <port>`."))
+			fmt.Fprintln(stdout, ui.Dim.Render("No reserved ports yet — run `gate up` in a project or `gate add <service> <domain> <port>`."))
 		} else {
 			fmt.Fprintln(stdout, "No reserved ports.")
 		}
 		return ExitOK
 	}
 	if richOut(stdout, false) {
-		headers := []string{"PORT", "OWNER", "TARGET", "STATUS"}
+		headers := []string{"PORT", "SCOPE", "SERVICE", "TARGET", "STATUS"}
 		data := make([][]string, 0, len(rows))
 		for _, r := range rows {
 			data = append(data, []string{
-				strconv.Itoa(r.Port), displayPortOwner(r), displayDomainURL(r.Domain), statusDot(r.Status, true),
+				strconv.Itoa(r.Port), displayPortScope(r), r.Service, displayDomainURL(r.Domain), statusDot(r.Status, true),
 			})
 		}
 		fmt.Fprintln(stdout, ui.Render(headers, data))
@@ -302,98 +256,161 @@ func listPorts(stdout, stderr io.Writer, jsonOut, all bool) int {
 	}
 	color := isTTY(stdout)
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(tw, "PORT\tOWNER\tTARGET\tSTATUS")
+	fmt.Fprintln(tw, "PORT\tSCOPE\tSERVICE\tTARGET\tSTATUS")
 	for _, r := range rows {
-		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\n", r.Port, displayPortOwner(r), displayDomainURL(r.Domain), statusDot(r.Status, color))
+		fmt.Fprintf(tw, "%d\t%s\t%s\t%s\t%s\n", r.Port, displayPortScope(r), r.Service, displayDomainURL(r.Domain), statusDot(r.Status, color))
 	}
 	_ = tw.Flush()
 	return ExitOK
 }
 
-func displayPortOwner(r portRow) string {
+func displayPortScope(r portRow) string {
 	if r.Project != "" {
-		if r.Service != "" {
-			return r.Project + "/" + r.Service
-		}
 		return r.Project
 	}
 	if r.Standalone {
-		if r.Service != "" {
-			return "standalone/" + r.Service
-		}
-		return "standalone"
+		return daemonScopeGlobal
 	}
 	return "-"
 }
 
-// Add reserves a domain→port mapping. Inside a gate project, it also appends a
-// service block to gate.toml; outside a project it creates a standalone registry
-// entry.
+// Add reserves a service/name -> domain -> port mapping in the selected scope.
 func Add(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
+	scopeFlags := defineDaemonScopeFlags(fs, false)
 	if handled, code := parseFlags(fs, "add", args, stdout, stderr); handled {
 		return code
 	}
+	sel, err := registryScopeFromFlags(scopeFlags, false)
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitUsage, "bad_scope", err.Error())
+	}
 	rest := fs.Args()
-	if len(rest) != 2 {
+	if len(rest) != 3 {
 		return usageFail(stderr, *jsonOut, "add")
 	}
-	domain := config.CanonicalDomain(rest[0])
+	name := strings.TrimSpace(rest[0])
+	if err := validateRegistryName(name, "service"); err != nil {
+		return fail(stderr, *jsonOut, ExitUsage, "bad_service", err.Error())
+	}
+	domain := config.CanonicalDomain(rest[1])
 	if err := config.ValidateDomain(domain); err != nil {
 		return fail(stderr, *jsonOut, ExitUsage, "bad_domain", err.Error())
 	}
-	p, err := strconv.Atoi(rest[1])
+	p, err := strconv.Atoi(rest[2])
 	if err != nil || p < 1 || p > 65535 {
 		return fail(stderr, *jsonOut, ExitUsage, "bad_port", "port must be 1-65535")
 	}
 
-	project, path, inProject, perr := optionalProject()
-	if perr != nil {
-		return fail(stderr, *jsonOut, ExitError, "project", perr.Error())
-	}
-	serviceName := serviceNameForDomain(domain)
-	res := registry.Reservation{Service: domain, Domain: domain, Port: p, TLS: config.TLSInternal, Standalone: true}
-	if inProject {
-		res = registry.Reservation{
-			Project: project.Name, Service: serviceName, Domain: domain, Port: p,
-			TLS: config.TLSInternal, ConfigPath: path,
-		}
-	}
-	if !inProject {
+	if sel.Scope.Kind == daemonScopeGlobal {
+		res := registry.Reservation{Service: name, Domain: domain, Port: p, TLS: config.TLSInternal, Standalone: true}
 		res.Active = true
 		res.DNS = dns.ModeFor(domain, "")
+		return addStandalone(res, stdout, stderr, *jsonOut)
 	}
 
+	project := sel.CurrentProject
+	path := sel.CurrentProjectPath
+	if project == nil {
+		project, path, err = projectConfigForName(sel.Scope.Name)
+		if err != nil {
+			return fail(stderr, *jsonOut, ExitError, "project", err.Error())
+		}
+	}
+	res := registry.Reservation{
+		Project: project.Name, Service: name, Domain: domain, Port: p,
+		TLS: config.TLSInternal, ConfigPath: path,
+	}
+	scope := projectDaemonScope(project.Name)
+	key := registry.Key(project.Name, name)
+	reg, err := registryStore().Read()
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitError, "registry_error", err.Error())
+	}
+	previous, hadPrevious := reg.Get(key)
+	beforeRoutes := activeRoutesForScope(reg, scope)
+	if hadPrevious {
+		res.Active = previous.Active
+		res.DNS = previous.DNS
+		if res.Active && res.DNS == "" {
+			res.DNS = dns.ModeFor(domain, "")
+		}
+	}
 	if err := registryStore().ReadReserve(res); err != nil {
 		return addError(stderr, *jsonOut, err)
 	}
-	if !inProject {
-		return addStandalone(res, stdout, stderr, *jsonOut)
+	originalConfig, err := os.ReadFile(path)
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitError, "config", err.Error())
 	}
-	if inProject {
-		if err := config.AddService(path, serviceName, config.Service{Domain: domain, Port: p, TLS: config.TLSInternal}); err != nil {
-			return fail(stderr, *jsonOut, ExitError, "config", err.Error())
-		}
+	originalInfo, err := os.Stat(path)
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitError, "config", err.Error())
+	}
+	if err := config.UpsertService(path, name, config.Service{Domain: domain, Port: p, TLS: config.TLSInternal}); err != nil {
+		return fail(stderr, *jsonOut, ExitError, "config", err.Error())
 	}
 	err = registryStore().Update(func(r *registry.Registry) error { return r.Reserve(res) })
 	var ce *registry.ConflictError
 	if errors.As(err, &ce) {
-		if inProject {
-			_ = config.RemoveService(path, serviceName)
+		if restoreErr := restoreProjectConfig(path, originalConfig, originalInfo.Mode().Perm()); restoreErr != nil {
+			return fail(stderr, *jsonOut, ExitError, "rollback_failed", "service add failed and config rollback failed: "+restoreErr.Error())
 		}
 		return addError(stderr, *jsonOut, err)
 	}
 	if err != nil {
-		if inProject {
-			_ = config.RemoveService(path, serviceName)
+		if restoreErr := restoreProjectConfig(path, originalConfig, originalInfo.Mode().Perm()); restoreErr != nil {
+			return fail(stderr, *jsonOut, ExitError, "rollback_failed", "service add failed and config rollback failed: "+restoreErr.Error())
 		}
 		return fail(stderr, *jsonOut, ExitError, "registry_error", err.Error())
 	}
-	if *jsonOut {
-		return writeJSON(stdout, map[string]any{"service": res.Service, "domain": domain, "port": p, "reserved": true})
+	if res.Active {
+		if err := ensureDomainDNS(res.Domain, res.DNS, stderr, *jsonOut); err != nil {
+			rollbackErr := restoreProjectAdd(path, originalConfig, originalInfo.Mode().Perm(), key, previous, hadPrevious, scope, beforeRoutes, stderr, *jsonOut)
+			if rollbackErr != nil {
+				return fail(stderr, *jsonOut, ExitError, "rollback_failed", "service add failed and rollback failed: "+rollbackErr.Error())
+			}
+			if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
+				return fail(stderr, *jsonOut, ExitPerm, "permission", err.Error())
+			}
+			return fail(stderr, *jsonOut, ExitError, "dns_failed", err.Error())
+		}
+		regAfter, rerr := registryStore().Read()
+		if rerr != nil {
+			rollbackErr := restoreProjectAdd(path, originalConfig, originalInfo.Mode().Perm(), key, previous, hadPrevious, scope, beforeRoutes, stderr, *jsonOut)
+			rollbackErr = errors.Join(rollbackErr, removeDomainDNS(res.Domain, res.DNS, stderr, *jsonOut))
+			if rollbackErr != nil {
+				return fail(stderr, *jsonOut, ExitError, "rollback_failed", "service add failed and rollback failed: "+rollbackErr.Error())
+			}
+			return fail(stderr, *jsonOut, ExitError, "registry_error", rerr.Error())
+		}
+		if code := reloadDaemonRoutes(scope, activeRoutesForScope(regAfter, scope), stderr, *jsonOut); code != ExitOK {
+			rollbackErr := restoreProjectAdd(path, originalConfig, originalInfo.Mode().Perm(), key, previous, hadPrevious, scope, beforeRoutes, stderr, *jsonOut)
+			rollbackErr = errors.Join(rollbackErr, removeDomainDNS(res.Domain, res.DNS, stderr, *jsonOut))
+			if rollbackErr != nil {
+				return fail(stderr, *jsonOut, ExitError, "rollback_failed", "service add failed and rollback failed: "+rollbackErr.Error())
+			}
+			return code
+		}
+		if hadPrevious && config.CanonicalDomain(previous.Domain) != config.CanonicalDomain(res.Domain) {
+			if err := removeDomainDNS(previous.Domain, previous.DNS, stderr, *jsonOut); err != nil {
+				rollbackErr := restoreProjectAdd(path, originalConfig, originalInfo.Mode().Perm(), key, previous, hadPrevious, scope, beforeRoutes, stderr, *jsonOut)
+				rollbackErr = errors.Join(rollbackErr, removeDomainDNS(res.Domain, res.DNS, stderr, *jsonOut))
+				if rollbackErr != nil {
+					return fail(stderr, *jsonOut, ExitError, "rollback_failed", "DNS cleanup failed and rollback failed: "+rollbackErr.Error())
+				}
+				if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
+					return fail(stderr, *jsonOut, ExitPerm, "permission", err.Error())
+				}
+				return fail(stderr, *jsonOut, ExitError, "dns_failed", err.Error())
+			}
+		}
 	}
-	fmt.Fprintf(stdout, "reserved  %s -> :%d\n", domain, p)
+	if *jsonOut {
+		return writeJSON(stdout, map[string]any{"project": project.Name, "service": res.Service, "domain": domain, "port": p, "reserved": true})
+	}
+	fmt.Fprintf(stdout, "reserved  %s/%s  %s -> :%d\n", project.Name, name, domain, p)
 	return ExitOK
 }
 
@@ -434,166 +451,138 @@ func addStandalone(res registry.Reservation, stdout, stderr io.Writer, jsonOut b
 		}
 		return code
 	}
+	if hadPrevious && config.CanonicalDomain(previous.Domain) != config.CanonicalDomain(res.Domain) {
+		if err := removeDomainDNS(previous.Domain, previous.DNS, stderr, jsonOut); err != nil {
+			rollbackErr := rollbackStandaloneAdd(key, previous, true, scope, beforeRoutes, stderr, jsonOut)
+			rollbackErr = errors.Join(rollbackErr, removeDomainDNS(res.Domain, res.DNS, stderr, jsonOut))
+			if rollbackErr != nil {
+				return fail(stderr, jsonOut, ExitError, "rollback_failed", "DNS cleanup failed and rollback failed: "+rollbackErr.Error())
+			}
+			if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
+				return fail(stderr, jsonOut, ExitPerm, "permission", err.Error())
+			}
+			return fail(stderr, jsonOut, ExitError, "dns_failed", err.Error())
+		}
+	}
 	if jsonOut {
 		return writeJSON(stdout, map[string]any{"service": res.Service, "domain": res.Domain, "port": res.Port, "reserved": true, "standalone": true})
 	}
-	fmt.Fprintf(stdout, "reserved  %s -> :%d\n", res.Domain, res.Port)
+	fmt.Fprintf(stdout, "reserved  %s  %s -> :%d\n", res.Service, res.Domain, res.Port)
 	return ExitOK
 }
 
-// Rm removes the reservation for a domain.
+// Rm removes one reservation from the selected scope.
 func Rm(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("rm", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
-	projectMode := fs.Bool("project", false, "remove all reservations for the current project, or the named project when NAME is passed")
+	scopeFlags := defineDaemonScopeFlags(fs, false)
 	if handled, code := parseFlags(fs, "rm", args, stdout, stderr); handled {
 		return code
 	}
-	rest := fs.Args()
-	if *projectMode {
-		return rmProject(rest, stdout, stderr, *jsonOut)
+	sel, err := registryScopeFromFlags(scopeFlags, false)
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitUsage, "bad_scope", err.Error())
 	}
+	rest := fs.Args()
 	if len(rest) != 1 {
 		return usageFail(stderr, *jsonOut, "rm")
 	}
-	domain := config.CanonicalDomain(rest[0])
-	if project, path, ok, perr := optionalProject(); perr != nil {
-		return fail(stderr, *jsonOut, ExitError, "project", perr.Error())
-	} else if ok {
-		for name, svc := range project.Services {
-			if config.CanonicalDomain(svc.Domain) != domain {
-				continue
-			}
-			originalConfig, err := os.ReadFile(path)
-			if err != nil {
-				return fail(stderr, *jsonOut, ExitError, "config", err.Error())
-			}
-			originalInfo, err := os.Stat(path)
-			if err != nil {
-				return fail(stderr, *jsonOut, ExitError, "config", err.Error())
-			}
-			scope := projectDaemonScope(project.Name)
-			reg, err := registryStore().Read()
-			if err != nil {
-				return fail(stderr, *jsonOut, ExitError, "registry_error", err.Error())
-			}
-			key := registry.Key(project.Name, name)
-			beforeRoutes := activeRoutesForScope(reg, scope)
-			removedRes, hadReservation := reg.Get(key)
-			if err := config.RemoveService(path, name); err != nil {
-				return fail(stderr, *jsonOut, ExitError, "config", err.Error())
-			}
-			var routes []proxy.Route
-			err = registryStore().Update(func(r *registry.Registry) error {
-				r.Release(key)
-				routes = activeRoutesForScope(r, scope)
-				return nil
-			})
-			if err != nil {
-				if restoreErr := restoreProjectConfig(path, originalConfig, originalInfo.Mode().Perm()); restoreErr != nil {
-					return fail(stderr, *jsonOut, ExitError, "rollback_failed", "service removal failed and config rollback failed: "+restoreErr.Error())
-				}
-				return fail(stderr, *jsonOut, ExitError, "registry_error", err.Error())
-			}
-			if code := reloadDaemonRoutes(scope, routes, stderr, *jsonOut); code != ExitOK {
-				if rollbackErr := restoreProjectServiceRemoval(path, originalConfig, originalInfo.Mode().Perm(), key, removedRes, hadReservation, scope, beforeRoutes, stderr, *jsonOut); rollbackErr != nil {
-					return fail(stderr, *jsonOut, ExitError, "rollback_failed", "service removal failed and rollback failed: "+rollbackErr.Error())
-				}
-				return code
-			}
-			if *jsonOut {
-				return writeJSON(stdout, map[string]any{"domain": domain, "removed": true})
-			}
-			fmt.Fprintf(stdout, "removed  %s\n", domain)
-			return ExitOK
-		}
+	name := strings.TrimSpace(rest[0])
+	if err := validateRegistryName(name, "service"); err != nil {
+		return fail(stderr, *jsonOut, ExitUsage, "bad_service", err.Error())
 	}
-	var removed bool
-	var removedRes registry.Reservation
-	var beforeRoutes []proxy.Route
-	var routes []proxy.Route
-	reg, err := registryStore().Read()
-	if err != nil {
-		return fail(stderr, *jsonOut, ExitError, "registry_error", err.Error())
+
+	if sel.Scope.Kind == daemonScopeProject && sel.CurrentProjectSelected {
+		return rmCurrentProjectService(sel, name, stdout, stderr, *jsonOut)
 	}
-	resToRemove, found := reservationByDomain(reg, domain)
-	if !found {
-		return fail(stderr, *jsonOut, ExitError, "not_found", fmt.Sprintf("no reservation for %q", domain))
-	}
-	scope := scopeForReservation(resToRemove)
-	beforeRoutes = activeRoutesForScope(reg, scope)
-	err = registryStore().Update(func(r *registry.Registry) error {
-		removedRes, removed = r.ReleaseDomain(domain)
-		routes = activeRoutesForScope(r, scope)
-		return nil
-	})
-	if err != nil {
-		return fail(stderr, *jsonOut, ExitError, "registry_error", err.Error())
-	}
-	if !removed {
-		return fail(stderr, *jsonOut, ExitError, "not_found", fmt.Sprintf("no reservation for %q", domain))
-	}
-	if code := reloadDaemonRoutes(scope, routes, stderr, *jsonOut); code != ExitOK {
-		_ = restoreReservations([]projectReservation{{Key: registry.Key(removedRes.Project, removedRes.Service), Reservation: removedRes}}, scope, beforeRoutes, stderr, *jsonOut)
-		return code
-	}
-	if err := removeDomainDNS(removedRes.Domain, removedRes.DNS, stderr, *jsonOut); err != nil {
-		rollbackErr := restoreReservations([]projectReservation{{Key: registry.Key(removedRes.Project, removedRes.Service), Reservation: removedRes}}, scope, beforeRoutes, stderr, *jsonOut)
-		if rollbackErr != nil {
-			return fail(stderr, *jsonOut, ExitError, "rollback_failed", "removal failed and rollback failed: "+rollbackErr.Error())
-		}
-		if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
-			return fail(stderr, *jsonOut, ExitPerm, "permission", err.Error())
-		}
-		return fail(stderr, *jsonOut, ExitError, "dns_failed", err.Error())
-	}
-	if *jsonOut {
-		return writeJSON(stdout, map[string]any{"domain": domain, "removed": true})
-	}
-	fmt.Fprintf(stdout, "removed  %s\n", domain)
-	return ExitOK
+	return rmScopedReservation(sel, name, stdout, stderr, *jsonOut)
 }
 
-func rmProject(args []string, stdout, stderr io.Writer, jsonOut bool) int {
-	if len(args) > 1 {
-		return usageFail(stderr, jsonOut, "rm")
+func rmCurrentProjectService(sel registryScopeSelection, name string, stdout, stderr io.Writer, jsonOut bool) int {
+	project := sel.CurrentProject
+	path := sel.CurrentProjectPath
+	if project == nil || path == "" {
+		return fail(stderr, jsonOut, ExitError, "no_project", "current project is required")
 	}
-	projectName := ""
-	if len(args) == 1 {
-		projectName = strings.TrimSpace(args[0])
-	} else {
-		project, err := currentProject()
-		if err != nil {
-			return fail(stderr, jsonOut, ExitError, "no_project", err.Error())
-		}
-		projectName = project.Name
+	if _, ok := project.Services[name]; !ok {
+		return fail(stderr, jsonOut, ExitError, "no_service", fmt.Sprintf("no service %q in project", name))
 	}
-	if projectName == "" {
-		return fail(stderr, jsonOut, ExitUsage, "bad_project", "project name is required")
+	originalConfig, err := os.ReadFile(path)
+	if err != nil {
+		return fail(stderr, jsonOut, ExitError, "config", err.Error())
+	}
+	originalInfo, err := os.Stat(path)
+	if err != nil {
+		return fail(stderr, jsonOut, ExitError, "config", err.Error())
 	}
 
+	scope := projectDaemonScope(project.Name)
 	reg, err := registryStore().Read()
 	if err != nil {
 		return fail(stderr, jsonOut, ExitError, "registry_error", err.Error())
 	}
-	var removed []projectReservation
-	for _, key := range reg.Keys() {
-		res := reg.Services[key]
-		if res.Project == projectName {
-			removed = append(removed, projectReservation{Key: key, Reservation: res})
-		}
-	}
-	if len(removed) == 0 {
-		return fail(stderr, jsonOut, ExitError, "not_found", fmt.Sprintf("no reservations for project %q", projectName))
-	}
-	scope := projectDaemonScope(projectName)
+	key := registry.Key(project.Name, name)
 	beforeRoutes := activeRoutesForScope(reg, scope)
-
+	removedRes, hadReservation := reg.Get(key)
+	if err := config.RemoveService(path, name); err != nil {
+		return fail(stderr, jsonOut, ExitError, "config", err.Error())
+	}
 	var routes []proxy.Route
 	err = registryStore().Update(func(r *registry.Registry) error {
-		for _, item := range removed {
-			r.Release(item.Key)
+		r.Release(key)
+		routes = activeRoutesForScope(r, scope)
+		return nil
+	})
+	if err != nil {
+		if restoreErr := restoreProjectConfig(path, originalConfig, originalInfo.Mode().Perm()); restoreErr != nil {
+			return fail(stderr, jsonOut, ExitError, "rollback_failed", "service removal failed and config rollback failed: "+restoreErr.Error())
 		}
+		return fail(stderr, jsonOut, ExitError, "registry_error", err.Error())
+	}
+	if code := reloadDaemonRoutes(scope, routes, stderr, jsonOut); code != ExitOK {
+		if rollbackErr := restoreProjectServiceRemoval(path, originalConfig, originalInfo.Mode().Perm(), key, removedRes, hadReservation, scope, beforeRoutes, stderr, jsonOut); rollbackErr != nil {
+			return fail(stderr, jsonOut, ExitError, "rollback_failed", "service removal failed and rollback failed: "+rollbackErr.Error())
+		}
+		return code
+	}
+	if hadReservation {
+		if err := removeDomainDNS(removedRes.Domain, removedRes.DNS, stderr, jsonOut); err != nil {
+			rollbackErr := restoreProjectServiceRemoval(path, originalConfig, originalInfo.Mode().Perm(), key, removedRes, hadReservation, scope, beforeRoutes, stderr, jsonOut)
+			if rollbackErr != nil {
+				return fail(stderr, jsonOut, ExitError, "rollback_failed", "DNS removal failed and rollback failed: "+rollbackErr.Error())
+			}
+			if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
+				return fail(stderr, jsonOut, ExitPerm, "permission", err.Error())
+			}
+			return fail(stderr, jsonOut, ExitError, "dns_failed", err.Error())
+		}
+	}
+	if jsonOut {
+		return writeJSON(stdout, map[string]any{"scope": daemonScopeProject, "project": project.Name, "service": name, "removed": true})
+	}
+	fmt.Fprintf(stdout, "removed  %s/%s\n", project.Name, name)
+	return ExitOK
+}
+
+func rmScopedReservation(sel registryScopeSelection, name string, stdout, stderr io.Writer, jsonOut bool) int {
+	projectName := ""
+	if sel.Scope.Kind == daemonScopeProject {
+		projectName = sel.Scope.Name
+	}
+	key := registry.Key(projectName, name)
+	reg, err := registryStore().Read()
+	if err != nil {
+		return fail(stderr, jsonOut, ExitError, "registry_error", err.Error())
+	}
+	removedRes, found := reg.Get(key)
+	if !found || !reservationMatchesScope(removedRes, sel) {
+		return fail(stderr, jsonOut, ExitError, "not_found", fmt.Sprintf("no reservation for %q", name))
+	}
+	scope := sel.Scope
+	beforeRoutes := activeRoutesForScope(reg, scope)
+	var routes []proxy.Route
+	err = registryStore().Update(func(r *registry.Registry) error {
+		r.Release(key)
 		routes = activeRoutesForScope(r, scope)
 		return nil
 	})
@@ -601,27 +590,36 @@ func rmProject(args []string, stdout, stderr io.Writer, jsonOut bool) int {
 		return fail(stderr, jsonOut, ExitError, "registry_error", err.Error())
 	}
 	if code := reloadDaemonRoutes(scope, routes, stderr, jsonOut); code != ExitOK {
-		if err := restoreProjectReservations(removed, scope, beforeRoutes, stderr, jsonOut); err != nil {
-			return fail(stderr, jsonOut, ExitError, "rollback_failed", "project removal failed and rollback failed: "+err.Error())
-		}
+		_ = restoreReservations([]projectReservation{{Key: key, Reservation: removedRes}}, scope, beforeRoutes, stderr, jsonOut)
 		return code
 	}
-	if code := removeProjectDNS(removed, beforeRoutes, stderr, jsonOut); code != ExitOK {
-		return code
+	if err := removeDomainDNS(removedRes.Domain, removedRes.DNS, stderr, jsonOut); err != nil {
+		rollbackErr := restoreReservations([]projectReservation{{Key: key, Reservation: removedRes}}, scope, beforeRoutes, stderr, jsonOut)
+		if rollbackErr != nil {
+			return fail(stderr, jsonOut, ExitError, "rollback_failed", "removal failed and rollback failed: "+rollbackErr.Error())
+		}
+		if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
+			return fail(stderr, jsonOut, ExitPerm, "permission", err.Error())
+		}
+		return fail(stderr, jsonOut, ExitError, "dns_failed", err.Error())
 	}
 	if jsonOut {
-		return writeJSON(stdout, map[string]any{"project": projectName, "removed": len(removed)})
+		out := map[string]any{"scope": scope.Kind, "service": name, "removed": true}
+		if projectName != "" {
+			out["project"] = projectName
+		}
+		return writeJSON(stdout, out)
 	}
-	fmt.Fprintf(stdout, "removed %d reservations for %s\n", len(removed), projectName)
+	fmt.Fprintf(stdout, "removed  %s\n", displayReservationOwner(removedRes))
 	return ExitOK
 }
 
-func removeProjectDNS(removed []projectReservation, beforeRoutes []proxy.Route, stderr io.Writer, jsonOut bool) int {
+func removeReservationsDNS(removed []projectReservation, scope daemonScope, beforeRoutes []proxy.Route, stderr io.Writer, jsonOut bool) int {
 	for i, item := range removed {
 		res := item.Reservation
 		if err := removeDomainDNS(res.Domain, res.DNS, stderr, jsonOut); err != nil {
 			rollbackErr := restoreProjectDNS(removed[:i], stderr, jsonOut)
-			rollbackErr = errors.Join(rollbackErr, restoreProjectReservations(removed, projectDaemonScope(res.Project), beforeRoutes, stderr, jsonOut))
+			rollbackErr = errors.Join(rollbackErr, restoreProjectReservations(removed, scope, beforeRoutes, stderr, jsonOut))
 			if rollbackErr != nil {
 				return fail(stderr, jsonOut, ExitError, "rollback_failed", "DNS removal failed and rollback failed: "+rollbackErr.Error())
 			}
@@ -658,6 +656,27 @@ func restoreProjectServiceRemoval(path string, originalConfig []byte, mode os.Fi
 		errs = append(errs, restoreReservations([]projectReservation{{Key: key, Reservation: res}}, scope, routes, stderr, jsonOut))
 	} else if err := setDaemonRoutesWithActivity(scope, routes, stderr, jsonOut, "restoring routes"); err != nil {
 		errs = append(errs, fmt.Errorf("restore daemon routes: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+func restoreProjectAdd(path string, originalConfig []byte, mode os.FileMode, key string, res registry.Reservation, hadReservation bool, scope daemonScope, routes []proxy.Route, stderr io.Writer, jsonOut bool) error {
+	var errs []error
+	if err := restoreProjectConfig(path, originalConfig, mode); err != nil {
+		errs = append(errs, fmt.Errorf("restore config: %w", err))
+	}
+	if hadReservation {
+		errs = append(errs, restoreReservations([]projectReservation{{Key: key, Reservation: res}}, scope, routes, stderr, jsonOut))
+	} else {
+		if err := registryStore().Update(func(r *registry.Registry) error {
+			r.Release(key)
+			return nil
+		}); err != nil {
+			errs = append(errs, fmt.Errorf("restore registry: %w", err))
+		}
+		if err := setDaemonRoutesWithActivity(scope, routes, stderr, jsonOut, "restoring routes"); err != nil {
+			errs = append(errs, fmt.Errorf("restore daemon routes: %w", err))
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -773,37 +792,6 @@ func dnsActivityAllowed(provider dns.Provider) bool {
 	}
 }
 
-func reservationByDomain(reg *registry.Registry, domain string) (registry.Reservation, bool) {
-	domain = config.CanonicalDomain(domain)
-	for _, key := range reg.Keys() {
-		res := reg.Services[key]
-		if config.CanonicalDomain(res.Domain) == domain {
-			return res, true
-		}
-	}
-	return registry.Reservation{}, false
-}
-
-func optionalProject() (*config.Project, string, bool, error) {
-	project, path, err := currentProjectPath()
-	if errors.Is(err, config.ErrNotFound) {
-		return nil, "", false, nil
-	}
-	if err != nil {
-		return nil, "", false, err
-	}
-	return project, path, true, nil
-}
-
-func serviceNameForDomain(domain string) string {
-	label, _, _ := strings.Cut(domain, ".")
-	label = strings.Trim(label, "-_")
-	if label == "" {
-		return "web"
-	}
-	return label
-}
-
 func addError(stderr io.Writer, jsonOut bool, err error) int {
 	var ce *registry.ConflictError
 	if errors.As(err, &ce) {
@@ -813,6 +801,92 @@ func addError(stderr io.Writer, jsonOut bool, err error) int {
 		return fail(stderr, jsonOut, ExitConflict, "port_conflict", ce.Error())
 	}
 	return fail(stderr, jsonOut, ExitError, "registry_error", err.Error())
+}
+
+// Clear removes every reservation in the selected project or global scope.
+func Clear(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("clear", flag.ContinueOnError)
+	jsonOut := fs.Bool("json", false, "emit JSON")
+	yes := fs.Bool("yes", false, "skip confirmation")
+	fs.BoolVar(yes, "y", false, "skip confirmation")
+	scopeFlags := defineDaemonScopeFlags(fs, false)
+	if handled, code := parseFlags(fs, "clear", args, stdout, stderr); handled {
+		return code
+	}
+	sel, err := registryScopeFromFlags(scopeFlags, false)
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitUsage, "bad_scope", err.Error())
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitError, "registry_error", err.Error())
+	}
+	removed := reservationsForScope(reg, sel)
+	scope := sel.Scope
+	beforeRoutes := activeRoutesForScope(reg, scope)
+	if !*yes {
+		if code := confirmClear(sel, len(removed), stdout, stderr, *jsonOut); code != ExitOK {
+			return code
+		}
+	}
+
+	var routes []proxy.Route
+	err = registryStore().Update(func(r *registry.Registry) error {
+		for _, item := range removed {
+			r.Release(item.Key)
+		}
+		routes = activeRoutesForScope(r, scope)
+		return nil
+	})
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitError, "registry_error", err.Error())
+	}
+	if code := reloadDaemonRoutes(scope, routes, stderr, *jsonOut); code != ExitOK {
+		if err := restoreReservations(removed, scope, beforeRoutes, stderr, *jsonOut); err != nil {
+			return fail(stderr, *jsonOut, ExitError, "rollback_failed", "clear failed and rollback failed: "+err.Error())
+		}
+		return code
+	}
+	if code := removeReservationsDNS(removed, scope, beforeRoutes, stderr, *jsonOut); code != ExitOK {
+		return code
+	}
+	if *jsonOut {
+		out := map[string]any{"scope": scope.Kind, "removed": true, "reservations": len(removed)}
+		if scope.Kind == daemonScopeProject {
+			out["project"] = scope.Name
+		}
+		return writeJSON(stdout, out)
+	}
+	fmt.Fprintf(stdout, "removed %s (%d reservations)\n", clearScopeLabel(scope), len(removed))
+	return ExitOK
+}
+
+func confirmClear(sel registryScopeSelection, count int, stdout, stderr io.Writer, jsonOut bool) int {
+	if jsonOut || !stdinIsTTYFunc() {
+		return fail(stderr, jsonOut, ExitUsage, "confirmation_required", "pass -y to clear reservations")
+	}
+	fmt.Fprintf(stdout, "remove %s (%d reservations)? type y or yes: ", clearScopeLabel(sel.Scope), count)
+	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	if err != nil {
+		return fail(stderr, false, ExitError, "confirm_failed", err.Error())
+	}
+	answer := strings.ToLower(strings.TrimSpace(line))
+	if answer != "y" && answer != "yes" {
+		return fail(stderr, false, ExitError, "cancelled", "clear cancelled")
+	}
+	return ExitOK
+}
+
+func clearScopeLabel(scope daemonScope) string {
+	if scope.Kind == daemonScopeProject {
+		return "project " + scope.Name
+	}
+	return "global reservations"
+}
+
+func stdinIsTTY() bool {
+	info, err := os.Stdin.Stat()
+	return err == nil && (info.Mode()&os.ModeCharDevice) != 0
 }
 
 // Prune garbage-collects reservations whose owning gate.toml no longer exists.
@@ -854,10 +928,24 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		usageLine(stderr, "run")
 		return ExitUsage
 	}
-	svc := args[0]
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	scopeFlags := defineDaemonScopeFlags(fs, false)
+	if handled, code := parseFlags(fs, "run", args[:sep], stdout, stderr); handled {
+		return code
+	}
+	rest := fs.Args()
+	if len(rest) != 1 {
+		usageLine(stderr, "run")
+		return ExitUsage
+	}
+	sel, err := registryScopeFromFlags(scopeFlags, false)
+	if err != nil {
+		return fail(stderr, false, ExitUsage, "bad_scope", err.Error())
+	}
+	svc := rest[0]
 	cmd := args[sep+1:]
 
-	res, lerr := lookupServiceReservation(svc)
+	res, lerr := lookupScopedReservation(svc, sel)
 	if lerr != nil {
 		return fail(stderr, false, lerr.Exit, lerr.Code, lerr.Message)
 	}

@@ -20,7 +20,7 @@ to other devices for testing.
 | Local HTTPS by domain | `https://app.localhost` or a custom local domain routes to a local upstream such as `127.0.0.1:4310`. |
 | Stable port assignment | A machine-wide registry reserves ports so projects do not hard-code or guess ports. |
 | Project-local config | `gate.toml` is the shareable source of truth for a repository's local routes. |
-| Standalone mappings | A developer can reserve a domain and port without a project file. |
+| Global reservations | A developer can reserve a named domain and port without a project file. |
 | Daemon hot reload | A resident proxy can receive new routes without restarting. |
 | Script/agent compatibility | Commands keep stdout data separate from stderr diagnostics; JSON output is stable and parseable. |
 | Temporary external test access | LAN, Cloudflared, and Tailscale providers can expose selected local services. |
@@ -83,8 +83,8 @@ flowchart TB
 ```
 
 The CLI computes desired state from project config and the registry. Daemons are
-scoped: project daemons serve one project, and the global daemon serves
-standalone reservations. If the relevant daemon is running, the CLI pushes that
+scoped: project daemons serve one project, and the global daemon serves global
+reservations. If the relevant daemon is running, the CLI pushes that
 scope's active route table through its admin socket. If the daemon is not
 running, route reservations still persist and can be loaded later.
 
@@ -125,7 +125,7 @@ stateDiagram-v2
     [*] --> Reserved: gate up / gate add
     Reserved --> Active: route loaded
     Active --> Reserved: gate down
-    Reserved --> Removed: gate rm
+    Reserved --> Removed: gate rm / gate clear
     Reserved --> Removed: gate prune when owning gate.toml is gone
 ```
 
@@ -133,7 +133,7 @@ stateDiagram-v2
 
 An active route is a reservation currently loaded into the proxy. The `Active`
 flag controls whether it is included in the daemon route table. `gate down`
-deactivates project routes but preserves reservations.
+deactivates scoped routes but preserves reservations.
 
 ### Liveness
 
@@ -231,9 +231,9 @@ Registry schema:
       "active": true,
       "config_path": "/repo/gate.toml"
     },
-    "/standalone.localhost": {
-      "service": "standalone.localhost",
-      "domain": "standalone.localhost",
+    "/web": {
+      "service": "web",
+      "domain": "web.localhost",
       "port": 4301,
       "tls": "internal",
       "standalone": true,
@@ -433,15 +433,15 @@ daemon conflicts only when the new process cannot bind the requested address.
 | Command | Purpose | Data mode |
 | --- | --- | --- |
 | `gate init [-y] [--name name] [--force]` | Scaffold a starter `gate.toml`. | text / json |
-| `gate up [-d\|--daemon] [--dns localhost\|hosts] [--https-addr addr] [--http-addr addr]` | Reserve ports, reflect DNS, activate routes, optionally start daemon. | text / json |
-| `gate down` | Deactivate current project routes and preserve reservations. | text / json |
-| `gate ls [-a] [--status live\|down]` | List reservations and liveness. | text / json |
-| `gate port [service] [-a\|--all]` | Print one port or list reserved ports. | text / json |
-| `gate add <domain> <port>` | Add a project service or standalone reservation. | text / json |
-| `gate rm <domain>` | Remove a domain reservation and project service block when applicable. | text / json |
-| `gate rm --project [name]` | Remove project reservations. | text / json |
+| `gate up [-g\|--global] [-p name\|--project name] [-d\|--daemon] [--dns localhost\|hosts] [--https-addr addr] [--http-addr addr]` | Reserve current-project ports or activate existing scoped reservations, reflect DNS, reload routes, optionally start daemon. | text / json |
+| `gate down [-g\|--global] [-p name\|--project name]` | Deactivate scoped routes and preserve reservations. | text / json |
+| `gate ls [-g\|--global] [-p name\|--project name] [-a\|--all] [--status live\|down]` | List scoped reservations and liveness. | text / json |
+| `gate port [-g\|--global] [-p name\|--project name] [-a\|--all] [service]` | Print one scoped port or list reserved ports. | text / json |
+| `gate add [-g\|--global] [-p name\|--project name] <service> <domain> <port>` | Add a scoped service/name reservation. | text / json |
+| `gate rm [-g\|--global] [-p name\|--project name] <service>` | Remove one scoped service/name reservation. | text / json |
+| `gate clear [-g\|--global] [-p name\|--project name] [-y\|--yes]` | Remove all reservations in one scope. | text / json |
 | `gate prune` | Remove reservations whose owning config no longer exists. | text / json |
-| `gate run <service> -- <cmd>` | Run a child command with `PORT` injected. | child stdio |
+| `gate run [-g\|--global] [-p name\|--project name] <service> -- <cmd>` | Run a child command with `PORT` injected from a scoped reservation. | child stdio |
 | `gate daemon start [-g\|--global] [-p name\|--project name] [--https-addr addr] [--http-addr addr]` | Start the scoped resident proxy. | text |
 | `gate daemon stop [-g\|--global] [-p name\|--project name] [-a\|--all]` | Stop scoped daemon(s). | text |
 | `gate daemon restart [-g\|--global] [-p name\|--project name] [--https-addr addr] [--http-addr addr]` | Restart one scoped daemon. | text |
@@ -452,10 +452,16 @@ daemon conflicts only when the new process cannot bind the requested address.
 | `gate untrust` | Remove the local root CA from trust stores. | text |
 | `gate uninstall [-y\|--yes] [--keep-trust] [--keep-brew]` | Remove gate state, binaries, and Homebrew package when applicable. | text |
 | `gate ca export` | Export the local root certificate. | text |
-| `gate expose <service> --via <provider> [--auth user:pass]` | Expose a project service through a provider. | text / json |
+| `gate expose [-g\|--global] [-p name\|--project name] <service> --via <provider> [--auth user:pass]` | Expose a scoped service/name through a provider. | text / json |
 | `gate completion <shell>` | Print shell completion. | script |
 | `gate upgrade [-y\|--yes]` | Upgrade to the latest release. | text |
 | `gate skill path\|print` | Locate or print the bundled agent skill. | text |
+
+Scope flags are mutually exclusive. Without a scope flag, registry commands use
+the current project when a `gate.toml` is discoverable; otherwise they use the
+global scope. `gate rm <service>` edits the current project's `gate.toml` when
+the default current-project scope is selected. `gate clear` removes registry,
+route, and DNS state only; it does not edit project config files.
 
 Exit codes:
 
@@ -543,7 +549,9 @@ flowchart LR
 | `cloudflared` | Public temporary URL | `cloudflared` in `PATH` | Prefer `--auth user:pass`; quick tunnel URL is temporary. |
 | `tailscale` | Tailnet | logged-in `tailscale` in `PATH` | Uses Tailscale Serve; detailed teardown is handled with Tailscale commands. |
 
-`gate expose` currently targets project services, not standalone domains.
+`gate expose` targets one scoped active route. Without a scope flag it resolves
+the current project when inside a `gate.toml` tree and global reservations
+otherwise.
 
 Security rule: exposing a route is the only way non-loopback clients can pass
 the proxy's loopback guard.

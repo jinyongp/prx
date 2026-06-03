@@ -4,7 +4,7 @@
 machine-wide registry of domain and port reservations.
 
 Use project mode when a repository should carry its routing in `gate.toml`.
-Use standalone mode when you want a machine-local mapping without adding a
+Use global reservations when you want a machine-local mapping without adding a
 project file.
 
 ## Install
@@ -118,35 +118,35 @@ Stop routing for the current project while keeping reservations:
 gate down
 ```
 
-## Standalone Mode
+## Global Reservations
 
-Standalone mode creates machine-local mappings without `gate.toml`. It is useful
+Global reservations create machine-local mappings without `gate.toml`. It is useful
 when you already know the domain and port and do not want a project file.
 
 Add a mapping:
 
 ```bash
-gate add web.localhost 3000
+gate add -g web web.localhost 3000
 ```
 
-Standalone reservations are served by the global daemon. If the global daemon is
+Global reservations are served by the global daemon. If the global daemon is
 running, routes are hot-reloaded. If it is stopped, starting it later loads
-active standalone routes from the registry:
+active global routes from the registry:
 
 ```bash
-gate daemon start --global
+gate daemon start -g
 ```
 
-Run a dev server through the standalone reservation:
+Run a dev server through the global reservation:
 
 ```bash
-gate run web.localhost -- pnpm dev
+gate run -g web -- pnpm dev
 ```
 
 Or use the port in your own command:
 
 ```bash
-PORT=$(gate port web.localhost) pnpm dev
+PORT=$(gate port -g web) pnpm dev
 ```
 
 Open:
@@ -155,14 +155,11 @@ Open:
 https://web.localhost
 ```
 
-Remove the standalone mapping:
+Remove the global mapping:
 
 ```bash
-gate rm web.localhost
+gate rm -g web
 ```
-
-Standalone mode is local-machine routing. `gate expose` currently works with
-project services, not standalone domains.
 
 ## Inspect Reservations
 
@@ -197,46 +194,65 @@ All reserved ports:
 gate port -a
 ```
 
-One service or standalone domain:
+One scoped service:
 
 ```bash
 gate port web
-gate port web.localhost
+gate port -g web
+gate port -p myapp web
 ```
 
 ## Manage Reservations
 
-Add a domain and fixed port:
+Add a current-project service and fixed port:
 
 ```bash
-gate add web.localhost 3000
+gate add web app.localhost 3000
 ```
 
-Inside a project, this appends a `[services.<name>]` block to `gate.toml` and
-updates the registry. Outside a project, this creates a standalone registry
-reservation.
+Inside a project, this adds or updates the `[services.<name>]` block in
+`gate.toml` and updates the registry.
 
-Remove a domain:
+Add a global reservation:
 
 ```bash
-gate rm web.localhost
+gate add -g web web.localhost 3000
 ```
 
-Inside a project, if the domain belongs to a service in `gate.toml`, that service
-block is removed and the registry is updated. Otherwise, the matching registry
-reservation is removed.
+Add a named project reservation:
+
+```bash
+gate add -p myapp web app.localhost 3000
+```
+
+Remove one service/name:
+
+```bash
+gate rm web
+gate rm -g web
+gate rm -p myapp web
+```
+
+Inside the current project, `gate rm <service>` removes that `[services.<name>]`
+block from `gate.toml` and updates the registry. `-g` and `-p` remove registry
+reservations only.
 
 Remove all reservations for the current project:
 
 ```bash
-gate rm --project
+gate clear -y
 ```
 
-Remove all reservations for a named project:
+Remove all global or named-project reservations:
 
 ```bash
-gate rm --project myapp
+gate clear -g -y
+gate clear -p myapp -y
 ```
+
+`gate clear` removes registry reservations and route/DNS state. It does not edit
+or delete `gate.toml`; use `gate rm <service>` to remove one current-project
+service block.
 
 Prune stale reservations whose owning `gate.toml` no longer exists:
 
@@ -244,14 +260,13 @@ Prune stale reservations whose owning `gate.toml` no longer exists:
 gate prune
 ```
 
-Standalone reservations are not pruned by `gate prune` because they have no
+Global reservations are not pruned by `gate prune` because they have no
 owning config file.
 
 ## Daemon
 
 Daemons are scoped. Inside a project, daemon commands target that project's
-daemon by default. Outside a project, they target the global daemon for
-standalone reservations.
+daemon by default. Outside a project, they target the global daemon.
 
 Start, stop, restart, and inspect the current scoped proxy:
 
@@ -316,8 +331,9 @@ gate up --json
 gate ls --json
 gate port -a --json
 gate daemon status --json
-gate add web.localhost 3000 --json
-gate rm web.localhost --json
+gate add web app.localhost 3000 --json
+gate rm web --json
+gate clear -y --json
 gate prune --json
 ```
 
@@ -383,7 +399,6 @@ Limitations:
 - The current LAN provider does not itself advertise mDNS or edit other devices'
   DNS/hosts files. It validates the domain and marks the running gate route as
   exposed.
-- `gate expose` currently works with project services, not standalone domains.
 - Devices must be on a network path that can reach the development machine.
 - Browser trust still depends on installing the gate root CA on each client
   device.
@@ -471,7 +486,6 @@ Limitations:
 - The URL is temporary and random.
 - The URL is not tied to your own domain.
 - The tunnel lasts only while the `cloudflared` process keeps running.
-- `gate expose` currently works with project services, not standalone domains.
 - The tunnel targets gate's local HTTPS origin. If origin certificate trust fails,
   run `gate trust` on the development machine and retry.
 - This mode is not a stable production tunnel configuration.
@@ -494,7 +508,6 @@ Prerequisites:
 
 Limitations:
 
-- `gate expose` currently works with project services, not standalone domains.
 - Access is limited to devices allowed by the tailnet and ACLs.
 - The current implementation runs `tailscale serve --bg`; gate does not manage
   detailed Tailscale Serve state after that.
@@ -522,13 +535,13 @@ Supported providers:
 | `cloudflared` | temporary public URL | requires `cloudflared` |
 | `tailscale` | tailnet access | requires `tailscale` |
 
-`gate expose` currently requires a project service name:
+`gate expose` targets a scoped service/name:
 
 ```bash
 gate expose <service> --via <provider>
+gate expose -g <name> --via <provider>
+gate expose -p <project> <service> --via <provider>
 ```
-
-It does not currently accept standalone domains directly.
 
 ## CA Export
 

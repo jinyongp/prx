@@ -14,7 +14,6 @@ import (
 	"gate/internal/config"
 	"gate/internal/daemon"
 	"gate/internal/paths"
-	"gate/internal/registry"
 )
 
 const (
@@ -209,13 +208,6 @@ func allDaemonScopes() ([]daemonScope, error) {
 
 func daemonClientFor(scope daemonScope) *daemon.Client {
 	return daemon.NewClient(scope.socketPath())
-}
-
-func scopeForReservation(res registry.Reservation) daemonScope {
-	if res.Project != "" {
-		return projectDaemonScope(res.Project)
-	}
-	return globalDaemonScope()
 }
 
 func slug(s string) string {

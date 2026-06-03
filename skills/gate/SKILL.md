@@ -42,13 +42,14 @@ fi
 | command | purpose |
 | --- | --- |
 | `gate init [--json] [--name name] [--force] [-y\|--yes]` | scaffold a starter `gate.toml` |
-| `gate up [--json] [-d\|--daemon] [--dns localhost\|hosts] [--https-addr addr] [--http-addr addr]` | reserve/allocate ports, reflect DNS, push routes |
-| `gate down [--json]` | deactivate this project's routes (reservations kept) |
-| `gate ls [-a\|--all] [--status live\|down] [--json]` | list reservations with live/down status |
-| `gate port [service] [-a\|--all] [--json]` | print one service port, or list reserved ports |
-| `gate run <service> -- <cmd...>` | run a command with `PORT` injected |
-| `gate add <domain> <port> [--json]` | reserve a domain→port mapping |
-| `gate rm <domain> [--json]` / `gate rm --project [name] [--json]` | remove a reservation or project reservations |
+| `gate up [-g\|--global] [-p name\|--project name] [--json] [-d\|--daemon] [--dns localhost\|hosts] [--https-addr addr] [--http-addr addr]` | reserve current-project ports or activate scoped reservations |
+| `gate down [-g\|--global] [-p name\|--project name] [--json]` | deactivate scoped routes (reservations kept) |
+| `gate ls [-g\|--global] [-p name\|--project name] [-a\|--all] [--status live\|down] [--json]` | list scoped reservations with live/down status |
+| `gate port [-g\|--global] [-p name\|--project name] [-a\|--all] [service] [--json]` | print one scoped service port, or list reserved ports |
+| `gate run [-g\|--global] [-p name\|--project name] <service> -- <cmd...>` | run a command with `PORT` injected |
+| `gate add [-g\|--global] [-p name\|--project name] <service> <domain> <port> [--json]` | reserve a scoped service/name mapping |
+| `gate rm [-g\|--global] [-p name\|--project name] <service> [--json]` | remove one scoped reservation |
+| `gate clear [-g\|--global] [-p name\|--project name] [-y\|--yes] [--json]` | remove all reservations in one scope |
 | `gate prune [--json]` | GC reservations whose gate.toml is gone |
 | `gate daemon start [-g\|--global] [-p name\|--project name] [--https-addr addr] [--http-addr addr]` | start one scoped proxy |
 | `gate daemon stop [-g\|--global] [-p name\|--project name] [-a\|--all]` | stop scoped proxy daemon(s) |
@@ -60,7 +61,7 @@ fi
 | `gate untrust` | remove the root CA from OS/browser trust stores |
 | `gate uninstall [-y\|--yes] [--keep-trust] [--keep-brew]` | remove gate state, binaries, and Homebrew package when applicable |
 | `gate ca export [--out path]` | export the root CA for other devices |
-| `gate expose <service> --via <provider> [--auth user:pass] [--json]` | reach a service externally |
+| `gate expose [-g\|--global] [-p name\|--project name] <service> --via <provider> [--auth user:pass] [--json]` | reach a scoped service externally |
 | `gate upgrade [-y\|--yes]` | upgrade to the latest GitHub release |
 | `gate skill path\|print` | locate or print this skill file |
 
@@ -137,13 +138,16 @@ Process env overrides dotenv values; earlier env files override later env files.
 `${NAME}` is required and errors when unset. `${NAME:-default}` is optional and
 uses `default` when unset or empty.
 
-Inside a project, `gate add`/`gate rm` edit this file in place, preserving comments.
-Outside a project they create/remove standalone registry reservations. Domains ending
-in `.localhost` need no sudo; custom domains use `/etc/hosts` (sudo).
-Project reservations are served by that project's daemon. Standalone
+Inside a project, `gate add <service> <domain> <port>` and `gate rm <service>`
+edit this file in place, preserving comments. Outside a project the default
+scope is global; use `-g` explicitly when operating from inside a project.
+`gate clear` removes scoped registry reservations and route/DNS state only; it
+does not edit `gate.toml`.
+Domains ending in `.localhost` need no sudo; custom domains use `/etc/hosts`
+(sudo). Project reservations are served by that project's daemon. Global
 reservations are served by the global daemon. If the relevant daemon is running,
-`up`/`down`/`add`/`rm` hot-reload only that scope. If it is stopped,
+`up`/`down`/`add`/`rm`/`clear` hot-reload only that scope. If it is stopped,
 `gate daemon start` inside a project starts the project daemon; outside a project
 it starts the global daemon. Use `gate daemon status --all` to inspect all known
-daemon scopes. Outside a project, `gate port <domain>` and
-`gate run <domain> -- ...` resolve standalone reservations by domain.
+daemon scopes. Outside a project, `gate port <name>` and
+`gate run <name> -- ...` resolve global reservations by name.

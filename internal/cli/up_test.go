@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"gate/internal/daemon"
+	"gate/internal/dns"
 	"gate/internal/port"
 	"gate/internal/proxy"
 	"gate/internal/registry"
@@ -169,6 +170,173 @@ func TestDownDeactivatesKeepsReservation(t *testing.T) {
 	}
 	if web.Port == 0 {
 		t.Fatal("reservation lost after down")
+	}
+}
+
+func TestUpDownGlobalScopeFromRegistryState(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(reg *registry.Registry) error {
+		return reg.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, Standalone: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Up([]string{"-g", "--json"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Up -g exit = %d, stderr=%s", code, errb.String())
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := reg.Services[registry.Key("", "web")]
+	if !res.Active {
+		t.Fatalf("global reservation not active: %+v", res)
+	}
+
+	out.Reset()
+	if code := Down([]string{"-g", "--json"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Down -g exit = %d, stderr=%s", code, errb.String())
+	}
+	reg, err = registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res = reg.Services[registry.Key("", "web")]
+	if res.Active || res.Port != 4400 {
+		t.Fatalf("global reservation not deactivated/preserved: %+v", res)
+	}
+}
+
+func TestUpDownNamedProjectScopeFromRegistryState(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(reg *registry.Registry) error {
+		return reg.Reserve(registry.Reservation{Project: "demo", Service: "web", Domain: "web.localhost", Port: 4400})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Up([]string{"-p", "demo", "--json"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Up -p demo exit = %d, stderr=%s", code, errb.String())
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := reg.Services[registry.Key("demo", "web")]
+	if !res.Active {
+		t.Fatalf("project reservation not active: %+v", res)
+	}
+
+	out.Reset()
+	if code := Down([]string{"-p", "demo", "--json"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Down -p demo exit = %d, stderr=%s", code, errb.String())
+	}
+	reg, err = registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res = reg.Services[registry.Key("demo", "web")]
+	if res.Active || res.Port != 4400 {
+		t.Fatalf("project reservation not deactivated/preserved: %+v", res)
+	}
+}
+
+func TestUpGlobalRestoresRegistryWhenDNSFails(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(reg *registry.Registry) error {
+		return reg.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, Standalone: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldSelect := selectDNSProvider
+	t.Cleanup(func() { selectDNSProvider = oldSelect })
+	selectDNSProvider = func(_, _ string) dns.Provider {
+		return fakeDNSProvider{ensure: func(string) error { return errors.New("dns failed") }}
+	}
+
+	var out, errb bytes.Buffer
+	if code := Up([]string{"-g"}, &out, &errb); code != ExitError {
+		t.Fatalf("Up -g exit = %d, stderr=%s", code, errb.String())
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := reg.Services[registry.Key("", "web")]
+	if res.Active || res.DNS != "" {
+		t.Fatalf("reservation not restored: %+v", res)
+	}
+}
+
+func TestDownGlobalRestoresRegistryWhenDNSFails(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(reg *registry.Registry) error {
+		return reg.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, DNS: "localhost", Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldSelect := selectDNSProvider
+	t.Cleanup(func() { selectDNSProvider = oldSelect })
+	selectDNSProvider = func(_, _ string) dns.Provider {
+		return fakeDNSProvider{remove: func(string) error { return errors.New("dns failed") }}
+	}
+
+	var out, errb bytes.Buffer
+	if code := Down([]string{"-g"}, &out, &errb); code != ExitError {
+		t.Fatalf("Down -g exit = %d, stderr=%s", code, errb.String())
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := reg.Services[registry.Key("", "web")]
+	if !res.Active {
+		t.Fatalf("reservation not restored: %+v", res)
+	}
+}
+
+func TestDownGlobalRestoresRegistryWhenReloadFails(t *testing.T) {
+	isolate(t)
+	shortConfigDir, err := os.MkdirTemp("/tmp", "gate-cli-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(shortConfigDir) })
+	t.Setenv("XDG_CONFIG_HOME", shortConfigDir)
+	t.Setenv("XDG_STATE_HOME", shortConfigDir)
+	if err := registryStore().Update(func(reg *registry.Registry) error {
+		return reg.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, DNS: "localhost", Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv := proxy.New(nil, nil)
+	stop, err := daemon.ServeAdmin(context.Background(), globalDaemonScope().socketPath(), srv)
+	if err != nil {
+		t.Fatalf("ServeAdmin: %v", err)
+	}
+	defer stop()
+	oldSelect := selectDNSProvider
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() {
+		selectDNSProvider = oldSelect
+		setDaemonRoutesFunc = oldSetRoutes
+	})
+	selectDNSProvider = func(_, _ string) dns.Provider { return fakeDNSProvider{} }
+	setDaemonRoutesFunc = func(_ daemonScope, _ []proxy.Route) error { return errors.New("reload failed") }
+
+	var out, errb bytes.Buffer
+	if code := Down([]string{"-g"}, &out, &errb); code != ExitError {
+		t.Fatalf("Down -g exit = %d, stderr=%s", code, errb.String())
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := reg.Services[registry.Key("", "web")]
+	if !res.Active {
+		t.Fatalf("reservation not restored: %+v", res)
 	}
 }
 

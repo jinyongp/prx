@@ -46,7 +46,7 @@ func (f fakeDNSProvider) Remove(domain string) error {
 func TestAddThenLsJSON(t *testing.T) {
 	isolate(t)
 	var out, errb bytes.Buffer
-	if code := Add([]string{"web.localhost", "4312"}, &out, &errb); code != ExitOK {
+	if code := Add([]string{"web", "web.localhost", "4312"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Add exit = %d, stderr=%s", code, errb.String())
 	}
 
@@ -71,11 +71,11 @@ func TestAddThenLsJSON(t *testing.T) {
 func TestAddPortConflictExit4(t *testing.T) {
 	isolate(t)
 	var out, errb bytes.Buffer
-	if code := Add([]string{"a.localhost", "4312"}, &out, &errb); code != ExitOK {
+	if code := Add([]string{"a", "a.localhost", "4312"}, &out, &errb); code != ExitOK {
 		t.Fatalf("first Add exit = %d", code)
 	}
 	errb.Reset()
-	code := Add([]string{"b.localhost", "4312"}, &out, &errb)
+	code := Add([]string{"b", "b.localhost", "4312"}, &out, &errb)
 	if code != ExitConflict {
 		t.Fatalf("conflict exit = %d, want %d", code, ExitConflict)
 	}
@@ -84,7 +84,7 @@ func TestAddPortConflictExit4(t *testing.T) {
 func TestAddRejectsInvalidDomain(t *testing.T) {
 	isolate(t)
 	var out, errb bytes.Buffer
-	code := Add([]string{"--json", "web..localhost", "4312"}, &out, &errb)
+	code := Add([]string{"--json", "web", "web..localhost", "4312"}, &out, &errb)
 	if code != ExitUsage {
 		t.Fatalf("Add exit = %d, want %d; stderr=%s", code, ExitUsage, errb.String())
 	}
@@ -96,13 +96,13 @@ func TestAddRejectsInvalidDomain(t *testing.T) {
 func TestAddJSONErrorEnvelope(t *testing.T) {
 	isolate(t)
 	var out, errb bytes.Buffer
-	_ = Add([]string{"a.localhost", "4312", "--json"}, &out, &errb) // parse note: flags before args
+	_ = Add([]string{"a", "a.localhost", "4312", "--json"}, &out, &errb) // parse note: flags before args
 	// Force a conflict with JSON envelope.
 	out.Reset()
 	errb.Reset()
-	_ = Add([]string{"--json", "a.localhost", "4312"}, &out, &errb)
+	_ = Add([]string{"--json", "a", "a.localhost", "4312"}, &out, &errb)
 	errb.Reset()
-	code := Add([]string{"--json", "b.localhost", "4312"}, &out, &errb)
+	code := Add([]string{"--json", "b", "b.localhost", "4312"}, &out, &errb)
 	if code != ExitConflict {
 		t.Fatalf("exit = %d", code)
 	}
@@ -127,7 +127,7 @@ func TestAddDomainConflictJSONErrorEnvelope(t *testing.T) {
 		t.Fatal(err)
 	}
 	var out, errb bytes.Buffer
-	code := Add([]string{"--json", "a.localhost", "4313"}, &out, &errb)
+	code := Add([]string{"--json", "web", "a.localhost", "4313"}, &out, &errb)
 	if code != ExitConflict {
 		t.Fatalf("exit = %d, want %d", code, ExitConflict)
 	}
@@ -147,7 +147,7 @@ func TestAddDomainConflictJSONErrorEnvelope(t *testing.T) {
 func TestTrailingJSONFlag(t *testing.T) {
 	isolate(t)
 	var out, errb bytes.Buffer
-	if code := Add([]string{"a.localhost", "4312", "--json"}, &out, &errb); code != ExitOK {
+	if code := Add([]string{"a", "a.localhost", "4312", "--json"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Add exit = %d, stderr=%s", code, errb.String())
 	}
 	var add struct {
@@ -158,7 +158,7 @@ func TestTrailingJSONFlag(t *testing.T) {
 		t.Fatalf("add json: %v\n%s", err, out.String())
 	}
 	out.Reset()
-	if code := Port([]string{"a.localhost", "--json"}, &out, &errb); code != ExitOK {
+	if code := Port([]string{"a", "--json"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Port outside project exit = %d, stderr=%s", code, errb.String())
 	}
 	var gotPort struct {
@@ -169,7 +169,7 @@ func TestTrailingJSONFlag(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &gotPort); err != nil {
 		t.Fatalf("port json: %v\n%s", err, out.String())
 	}
-	if gotPort.Service != "a.localhost" || gotPort.Port != 4312 || !gotPort.Standalone {
+	if gotPort.Service != "a" || gotPort.Port != 4312 || !gotPort.Standalone {
 		t.Fatalf("port json = %+v", gotPort)
 	}
 }
@@ -184,29 +184,29 @@ func TestJSONCommandsDoNotEmitIndicatorBytes(t *testing.T) {
 
 	out.Reset()
 	errb.Reset()
-	if code := Down([]string{"--json"}, &out, &errb); code != ExitOK {
-		t.Fatalf("Down --json exit = %d, stderr=%s", code, errb.String())
-	}
-	assertNoIndicatorBytes(t, "down stderr", errb.String())
-
-	out.Reset()
-	errb.Reset()
 	if code := Expose([]string{"web", "--json"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Expose --json exit = %d, stderr=%s", code, errb.String())
 	}
 	assertNoIndicatorBytes(t, "expose stderr", errb.String())
 
+	out.Reset()
+	errb.Reset()
+	if code := Down([]string{"--json"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Down --json exit = %d, stderr=%s", code, errb.String())
+	}
+	assertNoIndicatorBytes(t, "down stderr", errb.String())
+
 	isolate(t)
 	out.Reset()
 	errb.Reset()
-	if code := Add([]string{"--json", "standalone.localhost", "4312"}, &out, &errb); code != ExitOK {
+	if code := Add([]string{"--json", "standalone", "standalone.localhost", "4312"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Add --json exit = %d, stderr=%s", code, errb.String())
 	}
 	assertNoIndicatorBytes(t, "add stderr", errb.String())
 
 	out.Reset()
 	errb.Reset()
-	if code := Rm([]string{"--json", "standalone.localhost"}, &out, &errb); code != ExitOK {
+	if code := Rm([]string{"--json", "standalone"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Rm --json exit = %d, stderr=%s", code, errb.String())
 	}
 	assertNoIndicatorBytes(t, "rm stderr", errb.String())
@@ -264,14 +264,14 @@ func TestAddStandaloneActivatesDNSAndRoutes(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Add([]string{"web.localhost", "4312"}, &out, &errb); code != ExitOK {
+	if code := Add([]string{"web", "web.localhost", "4312"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Add exit = %d, stderr=%s", code, errb.String())
 	}
 	reg, err := registryStore().Read()
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, ok := reg.Get(registry.Key("", "web.localhost"))
+	res, ok := reg.Get(registry.Key("", "web"))
 	if !ok || !res.Standalone || !res.Active || res.Port != 4312 {
 		t.Fatalf("standalone reservation = %+v, ok=%v", res, ok)
 	}
@@ -283,11 +283,109 @@ func TestAddStandaloneActivatesDNSAndRoutes(t *testing.T) {
 	}
 }
 
+func TestAddGlobalTextDoesNotPrefixName(t *testing.T) {
+	isolate(t)
+	oldSelect := selectDNSProvider
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() {
+		selectDNSProvider = oldSelect
+		setDaemonRoutesFunc = oldSetRoutes
+	})
+	selectDNSProvider = func(_, _ string) dns.Provider { return fakeDNSProvider{} }
+	setDaemonRoutesFunc = func(_ daemonScope, _ []proxy.Route) error { return nil }
+
+	var out, errb bytes.Buffer
+	if code := Add([]string{"-g", "web", "web.localhost", "4312"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Add -g exit = %d, stderr=%s", code, errb.String())
+	}
+	if strings.Contains(out.String(), "global"+"/") || !strings.Contains(out.String(), "web  web.localhost") {
+		t.Fatalf("unexpected stdout: %q", out.String())
+	}
+}
+
+func TestAddGlobalUpdateRemovesOldDNS(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{
+			Service:    "web",
+			Domain:     "old.localhost",
+			Port:       4311,
+			DNS:        "localhost",
+			Standalone: true,
+			Active:     true,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldSelect := selectDNSProvider
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() {
+		selectDNSProvider = oldSelect
+		setDaemonRoutesFunc = oldSetRoutes
+	})
+	var ensured, removed []string
+	selectDNSProvider = func(_, _ string) dns.Provider {
+		return fakeDNSProvider{
+			ensure: func(domain string) error {
+				ensured = append(ensured, domain)
+				return nil
+			},
+			remove: func(domain string) error {
+				removed = append(removed, domain)
+				return nil
+			},
+		}
+	}
+	setDaemonRoutesFunc = func(_ daemonScope, _ []proxy.Route) error { return nil }
+
+	var out, errb bytes.Buffer
+	if code := Add([]string{"-g", "web", "new.localhost", "4312"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Add update exit = %d, stderr=%s", code, errb.String())
+	}
+	if len(ensured) != 1 || ensured[0] != "new.localhost" {
+		t.Fatalf("ensured = %v", ensured)
+	}
+	if len(removed) != 1 || removed[0] != "old.localhost" {
+		t.Fatalf("removed = %v", removed)
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := reg.Services[registry.Key("", "web")]
+	if res.Domain != "new.localhost" || res.Port != 4312 {
+		t.Fatalf("reservation = %+v", res)
+	}
+}
+
+func TestRmRejectsDomainSelectorAndDot(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web.localhost", Domain: "web.localhost", Port: 4312, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	for _, arg := range []string{"web.localhost", "."} {
+		errb.Reset()
+		if code := Rm([]string{arg}, &out, &errb); code != ExitUsage {
+			t.Fatalf("Rm %q exit = %d, want usage; stderr=%s", arg, code, errb.String())
+		}
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.Get(registry.Key("", "web.localhost")); !ok {
+		t.Fatal("legacy domain-shaped reservation was removed")
+	}
+}
+
 func TestAddStandaloneRestoresExistingReservationWhenReloadFails(t *testing.T) {
 	isolate(t)
 	if err := registryStore().Update(func(r *registry.Registry) error {
 		return r.Reserve(registry.Reservation{
-			Service:    "web.localhost",
+			Service:    "web",
 			Domain:     "web.localhost",
 			Port:       4312,
 			DNS:        "localhost",
@@ -322,14 +420,14 @@ func TestAddStandaloneRestoresExistingReservationWhenReloadFails(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Add([]string{"web.localhost", "4313"}, &out, &errb); code != ExitError {
+	if code := Add([]string{"web", "web.localhost", "4313"}, &out, &errb); code != ExitError {
 		t.Fatalf("Add exit = %d, want reload failure", code)
 	}
 	reg, err := registryStore().Read()
 	if err != nil {
 		t.Fatal(err)
 	}
-	res, ok := reg.Get(registry.Key("", "web.localhost"))
+	res, ok := reg.Get(registry.Key("", "web"))
 	if !ok || res.Port != 4312 {
 		t.Fatalf("reservation = %+v, ok=%v; want old port", res, ok)
 	}
@@ -367,14 +465,14 @@ func TestAddStandaloneRemovesNewReservationWhenReloadFails(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Add([]string{"web.localhost", "4312"}, &out, &errb); code != ExitError {
+	if code := Add([]string{"web", "web.localhost", "4312"}, &out, &errb); code != ExitError {
 		t.Fatalf("Add exit = %d, want reload failure", code)
 	}
 	reg, err := registryStore().Read()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := reg.Get(registry.Key("", "web.localhost")); ok {
+	if _, ok := reg.Get(registry.Key("", "web")); ok {
 		t.Fatal("new standalone reservation should be removed after reload failure")
 	}
 	if len(removed) != 1 || removed[0] != "web.localhost" {
@@ -392,7 +490,7 @@ func TestRmStandaloneRemovesDNSAndRoutes(t *testing.T) {
 	isolate(t)
 	if err := registryStore().Update(func(r *registry.Registry) error {
 		return r.Reserve(registry.Reservation{
-			Service:    "web.localhost",
+			Service:    "web",
 			Domain:     "web.localhost",
 			Port:       4312,
 			DNS:        "localhost",
@@ -424,14 +522,14 @@ func TestRmStandaloneRemovesDNSAndRoutes(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Rm([]string{"web.localhost"}, &out, &errb); code != ExitOK {
+	if code := Rm([]string{"web"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Rm exit = %d, stderr=%s", code, errb.String())
 	}
 	reg, err := registryStore().Read()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := reg.Get(registry.Key("", "web.localhost")); ok {
+	if _, ok := reg.Get(registry.Key("", "web")); ok {
 		t.Fatal("standalone reservation not removed")
 	}
 	if len(removed) != 1 || removed[0] != "web.localhost" {
@@ -446,7 +544,7 @@ func TestRmStandaloneRestoresReservationWhenReloadFails(t *testing.T) {
 	isolate(t)
 	if err := registryStore().Update(func(r *registry.Registry) error {
 		return r.Reserve(registry.Reservation{
-			Service:    "web.localhost",
+			Service:    "web",
 			Domain:     "web.localhost",
 			Port:       4312,
 			DNS:        "localhost",
@@ -481,14 +579,14 @@ func TestRmStandaloneRestoresReservationWhenReloadFails(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Rm([]string{"web.localhost"}, &out, &errb); code != ExitError {
+	if code := Rm([]string{"web"}, &out, &errb); code != ExitError {
 		t.Fatalf("Rm exit = %d, want reload failure", code)
 	}
 	reg, err := registryStore().Read()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := reg.Get(registry.Key("", "web.localhost")); !ok {
+	if _, ok := reg.Get(registry.Key("", "web")); !ok {
 		t.Fatal("standalone reservation should be restored after reload failure")
 	}
 	if len(removed) != 0 {
@@ -503,7 +601,7 @@ func TestRmStandaloneRestoresReservationWhenDNSFails(t *testing.T) {
 	isolate(t)
 	if err := registryStore().Update(func(r *registry.Registry) error {
 		return r.Reserve(registry.Reservation{
-			Service:    "web.localhost",
+			Service:    "web",
 			Domain:     "web.localhost",
 			Port:       4312,
 			DNS:        "localhost",
@@ -535,14 +633,14 @@ func TestRmStandaloneRestoresReservationWhenDNSFails(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Rm([]string{"web.localhost"}, &out, &errb); code != ExitError {
+	if code := Rm([]string{"web"}, &out, &errb); code != ExitError {
 		t.Fatalf("Rm exit = %d, want DNS failure", code)
 	}
 	reg, err := registryStore().Read()
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, ok := reg.Get(registry.Key("", "web.localhost")); !ok {
+	if _, ok := reg.Get(registry.Key("", "web")); !ok {
 		t.Fatal("standalone reservation should be restored after DNS failure")
 	}
 	if len(scopes) != 2 || scopes[0] != "global" || scopes[1] != "global" {
@@ -564,7 +662,7 @@ func TestRmStandaloneInsideUnrelatedProjectUsesGlobalScope(t *testing.T) {
 	t.Chdir(dir)
 	if err := registryStore().Update(func(r *registry.Registry) error {
 		return r.Reserve(registry.Reservation{
-			Service:    "web.localhost",
+			Service:    "web",
 			Domain:     "web.localhost",
 			Port:       4312,
 			DNS:        "localhost",
@@ -588,7 +686,7 @@ func TestRmStandaloneInsideUnrelatedProjectUsesGlobalScope(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Rm([]string{"web.localhost"}, &out, &errb); code != ExitOK {
+	if code := Rm([]string{"-g", "web"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Rm exit = %d, stderr=%s", code, errb.String())
 	}
 	if got, err := os.ReadFile(path); err != nil || string(got) != body {
@@ -610,7 +708,7 @@ func TestAddRmSyncProjectConfig(t *testing.T) {
 	t.Chdir(dir)
 
 	var out, errb bytes.Buffer
-	if code := Add([]string{"api.demo.localhost", "4312"}, &out, &errb); code != ExitOK {
+	if code := Add([]string{"api", "api.demo.localhost", "4312"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Add exit = %d, stderr=%s", code, errb.String())
 	}
 	edited, err := os.ReadFile(path)
@@ -628,7 +726,7 @@ func TestAddRmSyncProjectConfig(t *testing.T) {
 		t.Fatalf("registry missing demo/api: %+v", reg.Services)
 	}
 
-	if code := Rm([]string{"api.demo.localhost"}, &out, &errb); code != ExitOK {
+	if code := Rm([]string{"api"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Rm exit = %d, stderr=%s", code, errb.String())
 	}
 	edited, _ = os.ReadFile(path)
@@ -638,6 +736,105 @@ func TestAddRmSyncProjectConfig(t *testing.T) {
 	reg, _ = registryStore().Read()
 	if _, ok := reg.Get(registry.Key("demo", "api")); ok {
 		t.Fatal("registry service not removed")
+	}
+}
+
+func TestAddUpdatesExistingProjectService(t *testing.T) {
+	isolate(t)
+	dir := t.TempDir()
+	body := "# keep\n[project]\nname = \"demo\"\n\n[services.web]\ndomain = \"old.localhost\"\nport = 4311\n"
+	path := filepath.Join(dir, "gate.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Project: "demo", Service: "web", Domain: "old.localhost", Port: 4311, ConfigPath: path})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Add([]string{"web", "new.localhost", "4312"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Add update exit = %d, stderr=%s", code, errb.String())
+	}
+	edited, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := string(edited)
+	if !strings.Contains(s, "# keep") || !strings.Contains(s, `domain = "new.localhost"`) || !strings.Contains(s, "port = 4312") {
+		t.Fatalf("config not updated:\n%s", s)
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, ok := reg.Get(registry.Key("demo", "web"))
+	if !ok || res.Domain != "new.localhost" || res.Port != 4312 {
+		t.Fatalf("registry = %+v, ok=%v", res, ok)
+	}
+}
+
+func TestAddUpdatesActiveProjectServiceReloadsAndCleansOldDNS(t *testing.T) {
+	isolate(t)
+	dir := t.TempDir()
+	body := "# keep\n[project]\nname = \"demo\"\n\n[services.web]\ndomain = \"old.localhost\"\nport = 4311\n"
+	path := filepath.Join(dir, "gate.toml")
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Chdir(dir)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Project: "demo", Service: "web", Domain: "old.localhost", Port: 4311, DNS: "localhost", Active: true, ConfigPath: path})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldSelect := selectDNSProvider
+	oldSetRoutes := setDaemonRoutesFunc
+	t.Cleanup(func() {
+		selectDNSProvider = oldSelect
+		setDaemonRoutesFunc = oldSetRoutes
+	})
+	var ensured, removed []string
+	selectDNSProvider = func(_, _ string) dns.Provider {
+		return fakeDNSProvider{
+			ensure: func(domain string) error {
+				ensured = append(ensured, domain)
+				return nil
+			},
+			remove: func(domain string) error {
+				removed = append(removed, domain)
+				return nil
+			},
+		}
+	}
+	var routes []proxy.Route
+	setDaemonRoutesFunc = func(_ daemonScope, next []proxy.Route) error {
+		routes = append([]proxy.Route{}, next...)
+		return nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Add([]string{"web", "new.localhost", "4312"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Add update exit = %d, stderr=%s", code, errb.String())
+	}
+	if len(ensured) != 1 || ensured[0] != "new.localhost" {
+		t.Fatalf("ensured = %v", ensured)
+	}
+	if len(removed) != 1 || removed[0] != "old.localhost" {
+		t.Fatalf("removed = %v", removed)
+	}
+	if len(routes) != 1 || routes[0].Domain != "new.localhost" || routes[0].Upstream != "127.0.0.1:4312" {
+		t.Fatalf("routes = %+v", routes)
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	res := reg.Services[registry.Key("demo", "web")]
+	if !res.Active || res.DNS != "localhost" || res.Domain != "new.localhost" || res.Port != 4312 {
+		t.Fatalf("reservation = %+v", res)
 	}
 }
 
@@ -670,7 +867,7 @@ func TestRmProjectServiceRestoresConfigAndRegistryWhenReloadFails(t *testing.T) 
 	}
 
 	var out, errb bytes.Buffer
-	if code := Rm([]string{"api.demo.localhost"}, &out, &errb); code != ExitError {
+	if code := Rm([]string{"api"}, &out, &errb); code != ExitError {
 		t.Fatalf("Rm exit = %d, want reload failure", code)
 	}
 	edited, err := os.ReadFile(path)
@@ -692,17 +889,17 @@ func TestRmProjectServiceRestoresConfigAndRegistryWhenReloadFails(t *testing.T) 
 func TestRmRemoves(t *testing.T) {
 	isolate(t)
 	var out, errb bytes.Buffer
-	_ = Add([]string{"x.localhost", "4312"}, &out, &errb)
+	_ = Add([]string{"x", "x.localhost", "4312"}, &out, &errb)
 	out.Reset()
-	if code := Rm([]string{"x.localhost"}, &out, &errb); code != ExitOK {
+	if code := Rm([]string{"x"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Rm exit = %d", code)
 	}
-	if code := Rm([]string{"x.localhost"}, &out, &errb); code != ExitError {
+	if code := Rm([]string{"x"}, &out, &errb); code != ExitError {
 		t.Fatalf("second Rm exit = %d, want error", code)
 	}
 }
 
-func TestLsDefaultsToCurrentProjectActiveReservations(t *testing.T) {
+func TestLsDefaultsToCurrentProjectReservations(t *testing.T) {
 	isolate(t)
 	dir := t.TempDir()
 	toml := "[project]\nname = \"demo\"\n\n[services.web]\ndomain = \"app.localhost\"\n"
@@ -736,7 +933,7 @@ func TestLsDefaultsToCurrentProjectActiveReservations(t *testing.T) {
 	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
 		t.Fatalf("json: %v\n%s", err, out.String())
 	}
-	if len(got.Services) != 1 || got.Services[0].Project != "demo" || got.Services[0].Service != "web" {
+	if len(got.Services) != 2 || got.Services[0].Project != "demo" || got.Services[0].Service != "api" || got.Services[1].Service != "web" {
 		t.Fatalf("services = %+v", got.Services)
 	}
 }
@@ -776,6 +973,22 @@ func TestLsAllAndStatusFilter(t *testing.T) {
 	}
 }
 
+func TestLsGlobalDisplaysScopeAndService(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4312, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := Ls([]string{"-g"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Ls -g exit = %d, stderr=%s", code, errb.String())
+	}
+	if strings.Contains(out.String(), "global"+"/") || !strings.Contains(out.String(), "global") || !strings.Contains(out.String(), "web") {
+		t.Fatalf("ls missing global scope/service:\n%s", out.String())
+	}
+}
+
 func TestRmProjectRemovesCurrentProjectReservations(t *testing.T) {
 	isolate(t)
 	dir := t.TempDir()
@@ -798,8 +1011,8 @@ func TestRmProjectRemovesCurrentProjectReservations(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Rm([]string{"--project"}, &out, &errb); code != ExitOK {
-		t.Fatalf("Rm --project exit = %d, stderr=%s", code, errb.String())
+	if code := Clear([]string{"-y"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Clear exit = %d, stderr=%s", code, errb.String())
 	}
 	reg, err := registryStore().Read()
 	if err != nil {
@@ -816,6 +1029,60 @@ func TestRmProjectRemovesCurrentProjectReservations(t *testing.T) {
 	}
 }
 
+func TestClearJSONOutputIncludesScopeAndReservations(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, DNS: "localhost", Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Clear([]string{"-g", "-y", "--json"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Clear -g --json exit = %d, stderr=%s", code, errb.String())
+	}
+	var got struct {
+		Scope        string `json:"scope"`
+		Removed      bool   `json:"removed"`
+		Reservations int    `json:"reservations"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &got); err != nil {
+		t.Fatalf("json: %v\n%s", err, out.String())
+	}
+	if got.Scope != "global" || !got.Removed || got.Reservations != 1 {
+		t.Fatalf("clear json = %+v", got)
+	}
+}
+
+func TestConfirmClearAcceptsY(t *testing.T) {
+	oldTTY := stdinIsTTYFunc
+	oldStdin := os.Stdin
+	t.Cleanup(func() {
+		stdinIsTTYFunc = oldTTY
+		os.Stdin = oldStdin
+	})
+	stdinIsTTYFunc = func() bool { return true }
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	os.Stdin = reader
+	if _, err := writer.WriteString("y\n"); err != nil {
+		t.Fatal(err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := confirmClear(registryScopeSelection{Scope: globalDaemonScope()}, 2, &out, &errb, false); code != ExitOK {
+		t.Fatalf("confirmClear exit = %d, stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "global reservations (2 reservations)") {
+		t.Fatalf("prompt = %q", out.String())
+	}
+}
+
 func TestRmProjectRemovesNamedProjectReservations(t *testing.T) {
 	isolate(t)
 	err := registryStore().Update(func(r *registry.Registry) error {
@@ -829,8 +1096,8 @@ func TestRmProjectRemovesNamedProjectReservations(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Rm([]string{"--project", "demo"}, &out, &errb); code != ExitOK {
-		t.Fatalf("Rm --project demo exit = %d, stderr=%s", code, errb.String())
+	if code := Clear([]string{"-p", "demo", "-y"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Clear -p demo exit = %d, stderr=%s", code, errb.String())
 	}
 	reg, err := registryStore().Read()
 	if err != nil {
@@ -867,8 +1134,8 @@ func TestRmProjectRestoresRegistryWhenReloadFails(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Rm([]string{"--project", "demo"}, &out, &errb); code != ExitError {
-		t.Fatalf("Rm --project demo exit = %d, want reload failure", code)
+	if code := Clear([]string{"-p", "demo", "-y"}, &out, &errb); code != ExitError {
+		t.Fatalf("Clear -p demo exit = %d, want reload failure", code)
 	}
 	reg, err := registryStore().Read()
 	if err != nil {
@@ -900,8 +1167,8 @@ func TestRmProjectReportsRollbackFailureWhenRouteRestoreFails(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Rm([]string{"--project", "demo"}, &out, &errb); code != ExitError {
-		t.Fatalf("Rm --project demo exit = %d, want rollback failure", code)
+	if code := Clear([]string{"-p", "demo", "-y"}, &out, &errb); code != ExitError {
+		t.Fatalf("Clear -p demo exit = %d, want rollback failure", code)
 	}
 	if !strings.Contains(errb.String(), "rollback failed") {
 		t.Fatalf("stderr = %q, want rollback failure", errb.String())
@@ -952,8 +1219,8 @@ func TestRmProjectRestoresRegistryAndDNSWhenDNSFails(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Rm([]string{"--project", "demo"}, &out, &errb); code != ExitError {
-		t.Fatalf("Rm --project demo exit = %d, want DNS failure", code)
+	if code := Clear([]string{"-p", "demo", "-y"}, &out, &errb); code != ExitError {
+		t.Fatalf("Clear -p demo exit = %d, want DNS failure", code)
 	}
 	reg, err := registryStore().Read()
 	if err != nil {
@@ -1008,8 +1275,8 @@ func TestRmProjectReportsRollbackFailureWhenDNSRestoreFails(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Rm([]string{"--project", "demo"}, &out, &errb); code != ExitError {
-		t.Fatalf("Rm --project demo exit = %d, want rollback failure", code)
+	if code := Clear([]string{"-p", "demo", "-y"}, &out, &errb); code != ExitError {
+		t.Fatalf("Clear -p demo exit = %d, want rollback failure", code)
 	}
 	if !strings.Contains(errb.String(), "rollback failed") {
 		t.Fatalf("stderr = %q, want rollback failure", errb.String())
@@ -1067,7 +1334,7 @@ func TestPortListsReservedPorts(t *testing.T) {
 		t.Fatalf("Port exit = %d, stderr=%s", code, errb.String())
 	}
 	s := out.String()
-	for _, want := range []string{"PORT", "OWNER", "TARGET", "STATUS", "4400", "demo/web", "https://app.localhost"} {
+	for _, want := range []string{"PORT", "SCOPE", "SERVICE", "TARGET", "STATUS", "4400", "demo", "web", "https://app.localhost"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("port list missing %q in:\n%s", want, s)
 		}
@@ -1089,7 +1356,7 @@ func TestPortListsAllReservedPorts(t *testing.T) {
 		t.Fatalf("Port -a exit = %d, stderr=%s", code, errb.String())
 	}
 	s := out.String()
-	for _, want := range []string{"4400", "demo/web", "5500", "other/api", "https://api.localhost"} {
+	for _, want := range []string{"4400", "demo", "web", "5500", "other", "api", "https://api.localhost"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("port -a missing %q in:\n%s", want, s)
 		}
@@ -1099,7 +1366,7 @@ func TestPortListsAllReservedPorts(t *testing.T) {
 func TestPortListsStandaloneReservations(t *testing.T) {
 	isolate(t)
 	var out, errb bytes.Buffer
-	if code := Add([]string{"web.localhost", "4312"}, &out, &errb); code != ExitOK {
+	if code := Add([]string{"web", "web.localhost", "4312"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Add exit = %d, stderr=%s", code, errb.String())
 	}
 
@@ -1108,8 +1375,8 @@ func TestPortListsStandaloneReservations(t *testing.T) {
 		t.Fatalf("Port -a exit = %d, stderr=%s", code, errb.String())
 	}
 	s := out.String()
-	if !strings.Contains(s, "standalone/web.localhost") {
-		t.Fatalf("standalone owner missing in:\n%s", s)
+	if strings.Contains(s, "global"+"/") || !strings.Contains(s, "global") || !strings.Contains(s, "web") {
+		t.Fatalf("global scope/service missing in:\n%s", s)
 	}
 
 	out.Reset()
@@ -1178,7 +1445,7 @@ func TestRunUsesStandaloneReservationOutsideProject(t *testing.T) {
 	isolate(t)
 	if err := registryStore().Update(func(r *registry.Registry) error {
 		return r.Reserve(registry.Reservation{
-			Service:    "web.localhost",
+			Service:    "web",
 			Domain:     "web.localhost",
 			Port:       4312,
 			Standalone: true,
@@ -1189,7 +1456,7 @@ func TestRunUsesStandaloneReservationOutsideProject(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	code := Run([]string{"web.localhost", "--", "sh", "-c", `printf %s "$PORT"`}, &out, &errb)
+	code := Run([]string{"web", "--", "sh", "-c", `printf %s "$PORT"`}, &out, &errb)
 	if code != ExitOK {
 		t.Fatalf("Run exit = %d, stderr=%s", code, errb.String())
 	}

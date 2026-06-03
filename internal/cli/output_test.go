@@ -133,7 +133,7 @@ func TestLsEmptyJSON(t *testing.T) {
 func TestLsPlainNoEscapes(t *testing.T) {
 	isolate(t)
 	var out, errb bytes.Buffer
-	if code := Add([]string{"web.localhost", "4312"}, &out, &errb); code != ExitOK {
+	if code := Add([]string{"web", "web.localhost", "4312"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Add exit = %d, stderr=%s", code, errb.String())
 	}
 	out.Reset()
@@ -144,7 +144,7 @@ func TestLsPlainNoEscapes(t *testing.T) {
 	if strings.Contains(s, "\x1b") {
 		t.Fatalf("plain Ls leaked an ANSI escape:\n%q", s)
 	}
-	for _, want := range []string{"PROJECT", "SERVICE", "DOMAIN", "PORT", "TLS", "STATUS", "https://web.localhost", "4312"} {
+	for _, want := range []string{"SCOPE", "SERVICE", "DOMAIN", "PORT", "TLS", "STATUS", "global", "web", "https://web.localhost", "4312"} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("Ls output missing %q in:\n%s", want, s)
 		}

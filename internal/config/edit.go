@@ -49,6 +49,37 @@ func AddService(path, name string, svc Service) error {
 	return writeLines(path, lines)
 }
 
+// UpsertService adds or replaces the [services.<name>] table in gate.toml.
+func UpsertService(path, name string, svc Service) error {
+	svc.Domain = CanonicalDomain(svc.Domain)
+	if svc.TLS == "" {
+		svc.TLS = TLSInternal
+	}
+	if err := validateService(name, svc); err != nil {
+		return err
+	}
+	b, err := os.ReadFile(path)
+	if os.IsNotExist(err) {
+		return AddService(path, name, svc)
+	}
+	if err != nil {
+		return err
+	}
+	lines := splitLines(string(b))
+	start := headerIndex(lines, name)
+	if start < 0 {
+		return AddService(path, name, svc)
+	}
+	end := nextHeaderIndex(lines, start+1)
+	block := upsertServiceBlock(lines[start:end], svc)
+	lines = append(append(append([]string{}, lines[:start]...), block...), lines[end:]...)
+	content := strings.Join(lines, "\n") + "\n"
+	if _, err := parse(path, []byte(content)); err != nil {
+		return err
+	}
+	return fsutil.WriteAtomic(path, []byte(content), 0o644)
+}
+
 // RemoveService removes the [services.<name>] table from gate.toml, leaving all
 // other content untouched. It is a no-op (returns nil) if the service is absent.
 func RemoveService(path, name string) error {
@@ -70,11 +101,7 @@ func RemoveService(path, name string) error {
 }
 
 func validateEdit(path, name string, svc Service) error {
-	if !serviceNameRe.MatchString(name) {
-		return fmt.Errorf("invalid service name %q", name)
-	}
-	p := &Project{Name: "edit", Services: map[string]Service{name: svc}}
-	if err := p.Validate(); err != nil {
+	if err := validateService(name, svc); err != nil {
 		return err
 	}
 	if b, err := os.ReadFile(path); err == nil {
@@ -90,6 +117,56 @@ func validateEdit(path, name string, svc Service) error {
 		return err
 	}
 	return nil
+}
+
+func validateService(name string, svc Service) error {
+	if err := ValidateServiceName(name); err != nil {
+		return err
+	}
+	p := &Project{Name: "edit", Services: map[string]Service{name: svc}}
+	if err := p.Validate(); err != nil {
+		return err
+	}
+	return nil
+}
+
+func ValidateServiceName(name string) error {
+	if !serviceNameRe.MatchString(name) {
+		return fmt.Errorf("invalid service name %q", name)
+	}
+	return nil
+}
+
+func upsertServiceBlock(block []string, svc Service) []string {
+	out := append([]string{}, block...)
+	out = upsertTomlScalar(out, "domain", fmt.Sprintf("%q", svc.Domain))
+	if svc.Port > 0 {
+		out = upsertTomlScalar(out, "port", fmt.Sprintf("%d", svc.Port))
+	}
+	if svc.TLS != "" && svc.TLS != TLSInternal {
+		out = upsertTomlScalar(out, "tls", fmt.Sprintf("%q", svc.TLS))
+	}
+	if svc.ACMEDNS != "" {
+		out = upsertTomlScalar(out, "acme_dns", fmt.Sprintf("%q", svc.ACMEDNS))
+	}
+	return out
+}
+
+func upsertTomlScalar(lines []string, key, value string) []string {
+	prefix := key + " "
+	for i, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if !strings.HasPrefix(trimmed, prefix) {
+			continue
+		}
+		rest := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+		if !strings.HasPrefix(rest, "=") {
+			continue
+		}
+		lines[i] = key + " = " + value
+		return lines
+	}
+	return append(lines, key+" = "+value)
 }
 
 func renderBlock(name string, svc Service) string {

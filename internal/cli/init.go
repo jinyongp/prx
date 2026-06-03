@@ -228,9 +228,9 @@ func displayReservationOwner(res registry.Reservation) string {
 	}
 	if res.Standalone {
 		if res.Service != "" {
-			return "standalone/" + res.Service
+			return res.Service
 		}
-		return "standalone"
+		return "global"
 	}
 	if res.Service != "" {
 		return res.Service
