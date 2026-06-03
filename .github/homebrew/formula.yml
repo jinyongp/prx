@@ -5,10 +5,7 @@ dependencies:
   build:
     - go
 install: |
-  system "go", "build", *std_go_args(
-    ldflags: "-s -w -X main.version=v#{version}",
-    output: bin/"gate",
-  ), "./cmd/gate"
+  system "go", "build", *std_go_args(ldflags: "-s -w -X main.version=v#{version}", output: bin/"gate"), "./cmd/gate"
 test: |
   assert_match "v#{version}", shell_output("#{bin}/gate --version")
 caveats: |
