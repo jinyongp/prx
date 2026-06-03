@@ -25,6 +25,7 @@ ineffassign
 isatty
 jessevdk
 jinyongp
+justfile
 ldflags
 lipgloss
 lucasb
