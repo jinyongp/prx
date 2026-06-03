@@ -36,24 +36,25 @@ func (e exitCodeError) Error() string {
 // commands is the subcommand dispatch table. Subcommands register here as
 // features land across the implementation phases.
 var commands = map[string]command{
-	"init":    cli.Init,
-	"up":      cli.Up,
-	"down":    cli.Down,
-	"ls":      cli.Ls,
-	"port":    cli.Port,
-	"add":     cli.Add,
-	"rm":      cli.Rm,
-	"prune":   cli.Prune,
-	"run":     cli.Run,
-	"daemon":  cli.Daemon,
-	"doctor":  cli.Doctor,
-	"trust":   cli.Trust,
-	"untrust": cli.Untrust,
-	"ca":      cli.Ca,
-	"expose":  cli.Expose,
-	"upgrade": cli.Upgrade,
-	"skill":   cli.Skill,
-	"__serve": cli.Serve,
+	"init":      cli.Init,
+	"up":        cli.Up,
+	"down":      cli.Down,
+	"ls":        cli.Ls,
+	"port":      cli.Port,
+	"add":       cli.Add,
+	"rm":        cli.Rm,
+	"prune":     cli.Prune,
+	"run":       cli.Run,
+	"daemon":    cli.Daemon,
+	"doctor":    cli.Doctor,
+	"trust":     cli.Trust,
+	"untrust":   cli.Untrust,
+	"uninstall": cli.Uninstall,
+	"ca":        cli.Ca,
+	"expose":    cli.Expose,
+	"upgrade":   cli.Upgrade,
+	"skill":     cli.Skill,
+	"__serve":   cli.Serve,
 }
 
 func run(args []string, stdout, stderr io.Writer) int {
@@ -201,7 +202,7 @@ var commandGroups = []struct {
 	{"DAEMON", []string{"daemon"}},
 	{"TLS", []string{"trust", "untrust", "ca"}},
 	{"SHARE", []string{"expose"}},
-	{"MAINTENANCE", []string{"doctor", "upgrade", "skill", "completion"}},
+	{"MAINTENANCE", []string{"doctor", "upgrade", "uninstall", "skill", "completion"}},
 }
 
 // usageRich renders a styled, grouped usage screen for TTYs.

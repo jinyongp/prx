@@ -118,6 +118,17 @@ func TestHostsRemoveDropsBlockWhenEmpty(t *testing.T) {
 	}
 }
 
+func TestHostsRemoveManagedBlock(t *testing.T) {
+	h := tempHosts(t, "127.0.0.1\tlocalhost\n\n"+beginMarker+"\n127.0.0.1\told.example.com\n"+endMarker+"\n# after\n")
+	if err := h.RemoveManagedBlock(); err != nil {
+		t.Fatal(err)
+	}
+	want := "127.0.0.1\tlocalhost\n\n# after\n"
+	if got := read(t, h); got != want {
+		t.Fatalf("hosts content =\n%q\nwant\n%q", got, want)
+	}
+}
+
 func TestHostsRejectsSymlink(t *testing.T) {
 	dir := t.TempDir()
 	target := filepath.Join(dir, "real")

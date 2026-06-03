@@ -7,7 +7,15 @@ dependencies:
 install: |
   system "go", "build", *std_go_args(
     ldflags: "-s -w -X main.version=v#{version}",
-    output:  bin/"gate",
+    output: bin/"gate",
   ), "./cmd/gate"
 test: |
   assert_match "v#{version}", shell_output("#{bin}/gate --version")
+caveats: |
+  <<~EOS
+    For full cleanup, run:
+      gate uninstall
+
+    `brew uninstall gate` removes only the Homebrew package. It does not remove
+    gate's local state, trusted root CA, managed hosts block, or shell PATH block.
+  EOS

@@ -58,6 +58,13 @@ func (h Hosts) Remove(domain string) error {
 	})
 }
 
+// RemoveManagedBlock removes every gate-managed hosts entry and its markers.
+func (h Hosts) RemoveManagedBlock() error {
+	return h.edit(func([]string) []string {
+		return nil
+	})
+}
+
 func canonicalDomain(domain string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
 }

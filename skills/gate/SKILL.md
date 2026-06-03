@@ -58,6 +58,7 @@ fi
 | `gate doctor [--fix] [--json]` | check and repair local gate state |
 | `gate trust` | install the root CA (one time) |
 | `gate untrust` | remove the root CA from OS/browser trust stores |
+| `gate uninstall [-y\|--yes] [--keep-trust] [--keep-brew]` | remove gate state, binaries, and Homebrew package when applicable |
 | `gate ca export [--out path]` | export the root CA for other devices |
 | `gate expose <service> --via <provider> [--auth user:pass] [--json]` | reach a service externally |
 | `gate upgrade [-y\|--yes]` | upgrade to the latest GitHub release |

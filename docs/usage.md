@@ -560,13 +560,25 @@ gate completion fish
 
 ## Uninstall
 
-Homebrew install:
+Remove gate's local state, trust entry, managed hosts/PATH blocks, and known
+binaries:
 
 ```bash
-brew uninstall gate
+gate uninstall
 ```
 
-Install-script install:
+Non-interactive:
+
+```bash
+gate uninstall -y
+```
+
+If the running `gate` binary is Homebrew-managed, `gate uninstall` runs
+`brew uninstall gate` as its final step. Use `--keep-brew` to leave the
+Homebrew package installed. Use `--keep-trust` to leave trust store entries in
+place.
+
+If the `gate` binary is already gone, use the standalone uninstall script:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstall.sh | sh
@@ -582,8 +594,8 @@ curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstal
 > The uninstall script removes user-level config, data, state, and known binary
 > paths that exist on the machine. Before deleting local CA data, it attempts to
 > remove gate's trusted root CA from OS/browser trust stores. Use `--keep-trust`
-> to leave trust store entries in place. Homebrew-managed symlinks are skipped;
-> use `brew uninstall gate` for Homebrew installs.
+> to leave trust store entries in place. Homebrew-managed symlinks are skipped,
+> so the script does not remove the Homebrew package itself.
 
 Legacy single-daemon cleanup, for pre-scoped development builds:
 

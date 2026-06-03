@@ -35,6 +35,7 @@ var Specs = []CmdSpec{
 	{"doctor", "", "check and repair local gate state"},
 	{"trust", "", "install the local CA into the OS and browser trust stores"},
 	{"untrust", "", "remove the local CA from OS and browser trust stores"},
+	{"uninstall", "", "remove gate state, binaries, and Homebrew package when applicable"},
 	{"ca", "export [--out <path>]", "export the local CA certificate"},
 	{"expose", "<service> --via <provider>", "publish a local service through a public tunnel provider"},
 	{"completion", "<bash|zsh|fish>", "print shell completion script (bash|zsh|fish)"},

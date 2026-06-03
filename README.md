@@ -56,15 +56,25 @@ gate doctor --fix
 
 ## Uninstall
 
-Removes user-level config/data/state and binaries.
-
-Using Homebrew:
+Remove gate's local state, trust entry, managed hosts/PATH blocks, and known
+binaries:
 
 ```bash
-brew uninstall gate
+gate uninstall
 ```
 
-Or using the uninstall script:
+Non-interactive:
+
+```bash
+gate uninstall -y
+```
+
+If the running `gate` binary is Homebrew-managed, `gate uninstall` runs
+`brew uninstall gate` as its final step. Use `--keep-brew` to leave the
+Homebrew package installed. Use `--keep-trust` to leave trust store entries in
+place.
+
+If the `gate` binary is already gone, use the standalone uninstall script:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstall.sh | sh
@@ -78,12 +88,8 @@ curl -fsSL https://raw.githubusercontent.com/jinyongp/gate/main/scripts/uninstal
 The script first attempts to remove gate's trusted root CA from OS/browser trust
 stores, then removes only files and directories it discovers on the current
 machine. If privileged setup artifacts were never created, they are not removed.
-Homebrew-managed symlinks are skipped; use `brew uninstall gate` for Homebrew
-installs.
-
-By default it asks for confirmation before removing files.
-Use `-y` to skip it in automation.
-Use `--keep-trust` to leave trust store entries in place.
+Homebrew-managed symlinks are skipped by the script, so it does not remove the
+Homebrew package itself.
 
 ## Quick Start
 
@@ -116,10 +122,10 @@ Run this inside your app repository.
    name = "my-project"
 
    [services.web]
-   domain = "app.example.localhost"
+   domain = "web.my-project.localhost"
 
    [services.api]
-   domain = "api.example.localhost"
+   domain = "api.my-project.localhost"
    port = 3001
    ```
 
@@ -139,8 +145,8 @@ Run this inside your app repository.
    https://web.my-project.localhost
    ```
 
-   Use the route printed by `gate up`. If you edited the generated config to
-   match the example above, open `https://app.example.localhost` instead.
+   Use the route printed by `gate up`; if your project name or domain differs,
+   the URL differs too.
 
 `.localhost` domains need no DNS setup. Custom domains need `/etc/hosts` or
 another local DNS setup, so `gate up` may ask for administrator approval.

@@ -450,6 +450,7 @@ daemon conflicts only when the new process cannot bind the requested address.
 | `gate doctor [--fix] [--json]` | Check and repair local gate-owned state. | text / json |
 | `gate trust` | Install the local root CA into trust stores. | text |
 | `gate untrust` | Remove the local root CA from trust stores. | text |
+| `gate uninstall [-y\|--yes] [--keep-trust] [--keep-brew]` | Remove gate state, binaries, and Homebrew package when applicable. | text |
 | `gate ca export` | Export the local root certificate. | text |
 | `gate expose <service> --via <provider> [--auth user:pass]` | Expose a project service through a provider. | text / json |
 | `gate completion <shell>` | Print shell completion. | script |
