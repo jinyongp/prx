@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -30,8 +31,14 @@ var currentVersion = "dev"
 var (
 	restartDaemonAfterUpgradeFunc = restartDaemonAfterUpgrade
 	upgradeExecutablePathFunc     = executablePath
-	upgradeHomebrewCommandFunc    = func(ctx context.Context) *exec.Cmd {
-		return exec.CommandContext(ctx, "brew", "upgrade", "gate")
+	upgradeHomebrewUpdateFunc     = func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "brew", "update", "--force", "--quiet")
+	}
+	upgradeHomebrewCommandFunc = func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "brew", "upgrade", "jinyongp/tap/gate")
+	}
+	upgradeVersionCommandFunc = func(ctx context.Context, path string) *exec.Cmd {
+		return exec.CommandContext(ctx, path, "--version")
 	}
 )
 
@@ -82,16 +89,22 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 
 	daemonsBefore := daemonStatusesBeforeUpgrade()
 
-	if err := runUpgradeInstall(ctx, stdout, stderr); err != nil {
+	if err := runUpgradeInstall(ctx, stdout, stderr, latestTag); err != nil {
 		return fail(stderr, false, ExitError, "upgrade", err.Error())
 	}
 	return completeUpgrade(stdout, stderr, daemonsBefore)
 }
 
-func runUpgradeInstall(ctx context.Context, stdout, stderr io.Writer) error {
+func runUpgradeInstall(ctx context.Context, stdout, stderr io.Writer, expectedVersion string) error {
 	_ = stdout
 	if isHomebrewGatePath(upgradeExecutablePathFunc()) {
-		return runUpgradeCommand(stderr, "upgrading Homebrew package", "brew upgrade gate", upgradeHomebrewCommandFunc(ctx))
+		if err := runUpgradeCommand(stderr, "updating Homebrew taps", "brew update", upgradeHomebrewUpdateFunc(ctx)); err != nil {
+			return err
+		}
+		if err := runUpgradeCommand(stderr, "upgrading Homebrew package", "brew upgrade jinyongp/tap/gate", upgradeHomebrewCommandFunc(ctx)); err != nil {
+			return err
+		}
+		return verifyUpgradedVersion(ctx, expectedVersion)
 	}
 
 	scriptPath, err := prepareUpgradeScript(ctx, stderr)
@@ -102,8 +115,46 @@ func runUpgradeInstall(ctx context.Context, stdout, stderr io.Writer) error {
 		_ = os.Remove(scriptPath)
 	}()
 
+	if err := runUpgradeCommand(stderr, "installing gate", "install script", upgradeInstallScriptCommand(ctx, scriptPath, upgradeExecutablePathFunc())); err != nil {
+		return err
+	}
+	return verifyUpgradedVersion(ctx, expectedVersion)
+}
+
+func upgradeInstallScriptCommand(ctx context.Context, scriptPath, currentExecutable string) *exec.Cmd {
 	//nolint:gosec // G204: executing trusted, repo-fixed upgrade script.
-	return runUpgradeCommand(stderr, "installing gate", "install script", exec.CommandContext(ctx, "sh", scriptPath))
+	cmd := exec.CommandContext(ctx, "sh", scriptPath)
+	if dir := filepath.Dir(strings.TrimSpace(currentExecutable)); dir != "." && dir != "" {
+		cmd.Env = append(os.Environ(), "GATE_BIN_DIR="+dir)
+	}
+	return cmd
+}
+
+func verifyUpgradedVersion(ctx context.Context, expectedVersion string) error {
+	expected := normalizedVersion(expectedVersion)
+	if expected == "" {
+		return nil
+	}
+	path := upgradeExecutablePathFunc()
+	if strings.TrimSpace(path) == "" {
+		return fmt.Errorf("failed to verify upgraded version: current executable path is empty")
+	}
+
+	var output bytes.Buffer
+	cmd := upgradeVersionCommandFunc(ctx, path)
+	cmd.Stdout = &output
+	cmd.Stderr = &output
+	if err := cmd.Run(); err != nil {
+		return upgradeCommandError("verify upgraded version", err, output.String())
+	}
+	got := strings.TrimSpace(output.String())
+	if normalizedVersion(got) != expected {
+		if got == "" {
+			got = "unknown"
+		}
+		return fmt.Errorf("upgrade did not install %s; current binary reports %s", expectedVersion, got)
+	}
+	return nil
 }
 
 func runUpgradeCommand(stderr io.Writer, label, action string, cmd *exec.Cmd) error {

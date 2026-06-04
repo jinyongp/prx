@@ -100,44 +100,144 @@ func TestCompleteUpgradeAttemptsAllRestartsAfterFailure(t *testing.T) {
 
 func TestRunUpgradeInstallUsesHomebrewForHomebrewInstall(t *testing.T) {
 	oldExecutable := upgradeExecutablePathFunc
+	oldHomebrewUpdate := upgradeHomebrewUpdateFunc
 	oldHomebrewCommand := upgradeHomebrewCommandFunc
+	oldVersionCommand := upgradeVersionCommandFunc
 	t.Cleanup(func() {
 		upgradeExecutablePathFunc = oldExecutable
+		upgradeHomebrewUpdateFunc = oldHomebrewUpdate
 		upgradeHomebrewCommandFunc = oldHomebrewCommand
+		upgradeVersionCommandFunc = oldVersionCommand
 	})
 
 	upgradeExecutablePathFunc = func() string {
 		return "/opt/homebrew/Cellar/gate/1.1.3/bin/gate"
 	}
+	var calls []string
+	upgradeHomebrewUpdateFunc = func(context.Context) *exec.Cmd {
+		calls = append(calls, "update")
+		return helperUpgradeCommand(t, "brew update", 0)
+	}
 	upgradeHomebrewCommandFunc = func(context.Context) *exec.Cmd {
-		return helperUpgradeCommand(t, "brew upgrade gate", 0)
+		calls = append(calls, "upgrade")
+		return helperUpgradeCommand(t, "brew upgrade jinyongp/tap/gate", 0)
+	}
+	upgradeVersionCommandFunc = func(context.Context, string) *exec.Cmd {
+		calls = append(calls, "version")
+		return helperUpgradeCommand(t, "v1.1.4", 0)
 	}
 
 	var out, errb bytes.Buffer
-	if err := runUpgradeInstall(context.Background(), &out, &errb); err != nil {
+	if err := runUpgradeInstall(context.Background(), &out, &errb, "v1.1.4"); err != nil {
 		t.Fatalf("runUpgradeInstall: %v", err)
 	}
 	if strings.Contains(out.String(), "brew upgrade gate") || strings.Contains(errb.String(), "brew upgrade gate") {
 		t.Fatalf("brew output leaked: stdout=%q stderr=%q", out.String(), errb.String())
 	}
+	if strings.Join(calls, ",") != "update,upgrade,version" {
+		t.Fatalf("calls = %v, want update, upgrade, version", calls)
+	}
+}
+
+func TestRunUpgradeInstallRejectsHomebrewNoop(t *testing.T) {
+	oldExecutable := upgradeExecutablePathFunc
+	oldHomebrewUpdate := upgradeHomebrewUpdateFunc
+	oldHomebrewCommand := upgradeHomebrewCommandFunc
+	oldVersionCommand := upgradeVersionCommandFunc
+	t.Cleanup(func() {
+		upgradeExecutablePathFunc = oldExecutable
+		upgradeHomebrewUpdateFunc = oldHomebrewUpdate
+		upgradeHomebrewCommandFunc = oldHomebrewCommand
+		upgradeVersionCommandFunc = oldVersionCommand
+	})
+
+	upgradeExecutablePathFunc = func() string {
+		return "/opt/homebrew/Cellar/gate/2.0.0/bin/gate"
+	}
+	upgradeHomebrewUpdateFunc = func(context.Context) *exec.Cmd {
+		return helperUpgradeCommand(t, "brew update", 0)
+	}
+	upgradeHomebrewCommandFunc = func(context.Context) *exec.Cmd {
+		return helperUpgradeCommand(t, "already installed", 0)
+	}
+	upgradeVersionCommandFunc = func(context.Context, string) *exec.Cmd {
+		return helperUpgradeCommand(t, "v2.0.0", 0)
+	}
+
+	var out, errb bytes.Buffer
+	err := runUpgradeInstall(context.Background(), &out, &errb, "v2.0.1")
+	if err == nil {
+		t.Fatal("runUpgradeInstall should reject a no-op Homebrew upgrade")
+	}
+	if !strings.Contains(err.Error(), "upgrade did not install v2.0.1") || !strings.Contains(err.Error(), "v2.0.0") {
+		t.Fatalf("error did not explain version mismatch: %v", err)
+	}
+}
+
+func TestRunUpgradeInstallStopsWhenHomebrewUpdateFails(t *testing.T) {
+	oldExecutable := upgradeExecutablePathFunc
+	oldHomebrewUpdate := upgradeHomebrewUpdateFunc
+	oldHomebrewCommand := upgradeHomebrewCommandFunc
+	oldVersionCommand := upgradeVersionCommandFunc
+	t.Cleanup(func() {
+		upgradeExecutablePathFunc = oldExecutable
+		upgradeHomebrewUpdateFunc = oldHomebrewUpdate
+		upgradeHomebrewCommandFunc = oldHomebrewCommand
+		upgradeVersionCommandFunc = oldVersionCommand
+	})
+
+	upgradeExecutablePathFunc = func() string {
+		return "/opt/homebrew/Cellar/gate/2.0.0/bin/gate"
+	}
+	upgradeHomebrewUpdateFunc = func(context.Context) *exec.Cmd {
+		return helperUpgradeCommand(t, "tap fetch failed", 1)
+	}
+	upgradeHomebrewCommandFunc = func(context.Context) *exec.Cmd {
+		t.Fatal("brew upgrade should not run after brew update fails")
+		return nil
+	}
+	upgradeVersionCommandFunc = func(context.Context, string) *exec.Cmd {
+		t.Fatal("version verification should not run after brew update fails")
+		return nil
+	}
+
+	var out, errb bytes.Buffer
+	err := runUpgradeInstall(context.Background(), &out, &errb, "v2.0.1")
+	if err == nil {
+		t.Fatal("runUpgradeInstall should fail when brew update fails")
+	}
+	if !strings.Contains(err.Error(), "brew update") || !strings.Contains(err.Error(), "tap fetch failed") {
+		t.Fatalf("error did not include brew update failure: %v", err)
+	}
 }
 
 func TestRunUpgradeInstallUsesInstallerForNonHomebrewInstall(t *testing.T) {
 	oldExecutable := upgradeExecutablePathFunc
+	oldHomebrewUpdate := upgradeHomebrewUpdateFunc
 	oldHomebrewCommand := upgradeHomebrewCommandFunc
+	oldVersionCommand := upgradeVersionCommandFunc
 	oldClient := http.DefaultClient
 	t.Cleanup(func() {
 		upgradeExecutablePathFunc = oldExecutable
+		upgradeHomebrewUpdateFunc = oldHomebrewUpdate
 		upgradeHomebrewCommandFunc = oldHomebrewCommand
+		upgradeVersionCommandFunc = oldVersionCommand
 		http.DefaultClient = oldClient
 	})
 
 	upgradeExecutablePathFunc = func() string {
 		return "/Users/me/.local/bin/gate"
 	}
+	upgradeHomebrewUpdateFunc = func(context.Context) *exec.Cmd {
+		t.Fatal("brew update should not run for non-Homebrew install")
+		return nil
+	}
 	upgradeHomebrewCommandFunc = func(context.Context) *exec.Cmd {
 		t.Fatal("brew upgrade should not run for non-Homebrew install")
 		return nil
+	}
+	upgradeVersionCommandFunc = func(context.Context, string) *exec.Cmd {
+		return helperUpgradeCommand(t, "v1.1.4", 0)
 	}
 	http.DefaultClient = &http.Client{
 		Transport: roundTripFunc(func(*http.Request) (*http.Response, error) {
@@ -150,11 +250,25 @@ func TestRunUpgradeInstallUsesInstallerForNonHomebrewInstall(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if err := runUpgradeInstall(context.Background(), &out, &errb); err != nil {
+	if err := runUpgradeInstall(context.Background(), &out, &errb, "v1.1.4"); err != nil {
 		t.Fatalf("runUpgradeInstall: %v", err)
 	}
 	if strings.Contains(out.String(), "installer upgrade") || strings.Contains(errb.String(), "installer upgrade") {
 		t.Fatalf("installer output leaked: stdout=%q stderr=%q", out.String(), errb.String())
+	}
+}
+
+func TestUpgradeInstallScriptTargetsCurrentExecutableDir(t *testing.T) {
+	cmd := upgradeInstallScriptCommand(context.Background(), "/tmp/gate-upgrade.sh", "/opt/gate/bin/gate")
+	got := ""
+	for _, entry := range cmd.Env {
+		if strings.HasPrefix(entry, "GATE_BIN_DIR=") {
+			got = strings.TrimPrefix(entry, "GATE_BIN_DIR=")
+			break
+		}
+	}
+	if got != "/opt/gate/bin" {
+		t.Fatalf("GATE_BIN_DIR = %q, want /opt/gate/bin", got)
 	}
 }
 
