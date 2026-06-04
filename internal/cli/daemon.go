@@ -109,14 +109,14 @@ func daemonStatusForRef(ref listenerDaemonRef) daemon.Status {
 
 func printDaemonStatus(stdout io.Writer, st daemon.Status) {
 	if !st.Running {
-		fmt.Fprintf(stdout, "stopped · %s\n", st.Scope)
+		printInfo(stdout, "stopped · "+st.Scope)
 		return
 	}
 	if st.HTTPSAddr != "" || st.HTTPAddr != "" {
-		fmt.Fprintf(stdout, "running · %s · pid %d · uptime %ds · %d routes · https %s · http %s\n", st.Scope, st.PID, st.UptimeSec, st.Routes, st.HTTPSAddr, st.HTTPAddr)
+		printSuccess(stdout, fmt.Sprintf("running · %s · pid %d · uptime %ds · %d routes · https %s · http %s", st.Scope, st.PID, st.UptimeSec, st.Routes, st.HTTPSAddr, st.HTTPAddr))
 		return
 	}
-	fmt.Fprintf(stdout, "running · %s · pid %d · uptime %ds · %d routes\n", st.Scope, st.PID, st.UptimeSec, st.Routes)
+	printSuccess(stdout, fmt.Sprintf("running · %s · pid %d · uptime %ds · %d routes", st.Scope, st.PID, st.UptimeSec, st.Routes))
 }
 
 func daemonStart(args []string, stdout, stderr io.Writer) int {
@@ -140,7 +140,7 @@ func daemonStart(args []string, stdout, stderr io.Writer) int {
 		if err := setListenerRoutesWithActivity(ref, stderr, false, "reloading routes"); err != nil {
 			return fail(stderr, false, ExitError, "reload_failed", err.Error())
 		}
-		fmt.Fprintf(stdout, "already running · %s · https %s · http %s\n", ref.String(), displayListenAddr(st.HTTPSAddr), displayListenAddr(st.HTTPAddr))
+		printSuccess(stdout, fmt.Sprintf("already running · %s · https %s · http %s", ref.String(), displayListenAddr(st.HTTPSAddr), displayListenAddr(st.HTTPAddr)))
 		return ExitOK
 	}
 	if err := replaceScopedDaemonsForListener(pair); err != nil {
@@ -156,10 +156,10 @@ func daemonStart(args []string, stdout, stderr io.Writer) int {
 		}
 		st, err := client.Status()
 		if err != nil {
-			fmt.Fprintf(stdout, "started · %s · pid %d · https %s · http %s\n", ref.String(), result.PID, pair.HTTPSAddr, pair.HTTPAddr)
+			printSuccess(stdout, fmt.Sprintf("started · %s · pid %d · https %s · http %s", ref.String(), result.PID, pair.HTTPSAddr, pair.HTTPAddr))
 			return ExitOK
 		}
-		fmt.Fprintf(stdout, "started · %s · pid %d · https %s · http %s\n", ref.String(), result.PID, displayListenAddr(st.HTTPSAddr), displayListenAddr(st.HTTPAddr))
+		printSuccess(stdout, fmt.Sprintf("started · %s · pid %d · https %s · http %s", ref.String(), result.PID, displayListenAddr(st.HTTPSAddr), displayListenAddr(st.HTTPAddr)))
 		return ExitOK
 	}
 	return fail(stderr, false, result.Code, "start", result.Message)
@@ -206,10 +206,10 @@ func daemonRestart(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, false, ExitError, "reload_failed", err.Error())
 	}
 	if st, err := client.Status(); err == nil {
-		fmt.Fprintf(stdout, "restarted · %s · pid %d · https %s · http %s\n", ref.String(), st.PID, displayListenAddr(st.HTTPSAddr), displayListenAddr(st.HTTPAddr))
+		printSuccess(stdout, fmt.Sprintf("restarted · %s · pid %d · https %s · http %s", ref.String(), st.PID, displayListenAddr(st.HTTPSAddr), displayListenAddr(st.HTTPAddr)))
 		return ExitOK
 	}
-	fmt.Fprintf(stdout, "restarted · %s · pid %d · https %s · http %s\n", ref.String(), result.PID, pair.HTTPSAddr, pair.HTTPAddr)
+	printSuccess(stdout, fmt.Sprintf("restarted · %s · pid %d · https %s · http %s", ref.String(), result.PID, pair.HTTPSAddr, pair.HTTPAddr))
 	return ExitOK
 }
 
@@ -454,11 +454,15 @@ func cleanupStartedDaemon(client *daemon.Client, ref daemonStateRef, pid int) {
 }
 
 func printDaemonStop(stdout io.Writer, ref daemonStateRef, msg string, printScope bool) {
+	line := msg
 	if printScope {
-		fmt.Fprintf(stdout, "%s · %s\n", msg, ref.String())
-		return
+		line = msg + " · " + ref.String()
 	}
-	fmt.Fprintln(stdout, msg)
+	if msg == "stopped" {
+		printSuccess(stdout, line)
+	} else {
+		printInfo(stdout, line)
+	}
 }
 
 func stopDaemonProcess(client *daemon.Client, pid int, timeout time.Duration) error {
@@ -562,7 +566,7 @@ func daemonLogs(args []string, stdout, stderr io.Writer) int {
 			if printed > 0 {
 				fmt.Fprintln(stdout)
 			}
-			fmt.Fprintf(stdout, "== %s ==\n", ref.String())
+			printInfo(stdout, "== "+ref.String()+" ==")
 		}
 		_, _ = stdout.Write(b)
 		printed++

@@ -1,6 +1,7 @@
 package cli
 
 import (
+	"bufio"
 	"bytes"
 	"io"
 	"os"
@@ -192,6 +193,53 @@ func TestUninstallKeepBrewSkipsHomebrewManagedGateBinDir(t *testing.T) {
 	}
 	if _, err := os.Lstat(link); err != nil {
 		t.Fatalf("homebrew-managed symlink removed: %v", err)
+	}
+}
+
+func TestConfirmUninstallPromptNormalizesAnswers(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  bool
+	}{
+		{name: "yes", input: "yes\n", want: true},
+		{name: "y", input: "y\n", want: true},
+		{name: "no", input: "no\n", want: false},
+		{name: "empty", input: "\n", want: false},
+		{name: "other", input: "later\n", want: false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var out bytes.Buffer
+			got, err := confirmUninstallPrompt(bufio.NewReader(strings.NewReader(tc.input)), &out)
+			if err != nil {
+				t.Fatalf("confirmUninstallPrompt: %v", err)
+			}
+			if got != tc.want {
+				t.Fatalf("confirmUninstallPrompt(%q) = %v, want %v", tc.input, got, tc.want)
+			}
+			if !strings.Contains(out.String(), "Proceed with uninstall?") {
+				t.Fatalf("stdout missing prompt:\n%s", out.String())
+			}
+		})
+	}
+}
+
+func TestPrintUninstallPlanUsesRichLayoutWhenForced(t *testing.T) {
+	t.Setenv("FORCE_COLOR", "1")
+	t.Setenv("NO_COLOR", "")
+	t.Setenv("CLICOLOR", "")
+	t.Setenv("CLICOLOR_FORCE", "")
+
+	var out bytes.Buffer
+	printUninstallPlan(&out, []string{"/tmp/gate"}, []string{"Homebrew package gate"})
+
+	got := out.String()
+	if !strings.Contains(got, "Discovered artifacts") || !strings.Contains(got, "Homebrew package gate") {
+		t.Fatalf("stdout missing plan content:\n%s", got)
+	}
+	if strings.Contains(got, "Existing paths to remove:") || strings.Contains(got, "Cleanup actions:") {
+		t.Fatalf("stdout used plain labels:\n%s", got)
 	}
 }
 

@@ -109,12 +109,12 @@ func Up(args []string, stdout, stderr io.Writer) int {
 		if reloaded {
 			domain = proxyURL(r.Domain, actualHTTPSAddr)
 		}
-		fmt.Fprintf(stdout, "%s/%s  %s -> :%d\n", project.Name, r.Service, domain, r.Port)
+		printRoute(stdout, project.Name+"/"+r.Service, domain, r.Port)
 	}
 	if reloaded {
-		fmt.Fprintf(stdout, "proxy reloaded · %d routes active\n", len(routes))
+		printSuccess(stdout, fmt.Sprintf("proxy reloaded · %d routes active", len(routes)))
 	} else {
-		fmt.Fprintln(stderr, "note: no daemon running; start it with `gate daemon start`")
+		printInfo(stderr, "note: no daemon running; start it with `gate daemon start`")
 	}
 	return ExitOK
 }
@@ -228,12 +228,12 @@ func upExistingScope(sel registryScopeSelection, dnsMode string, startDaemon boo
 		if reloaded {
 			domain = proxyURL(r.Domain, actualHTTPSAddr)
 		}
-		fmt.Fprintf(stdout, "%s/%s  %s -> :%d\n", scope.String(), r.Service, domain, r.Port)
+		printRoute(stdout, scope.String()+"/"+r.Service, domain, r.Port)
 	}
 	if reloaded {
-		fmt.Fprintf(stdout, "proxy reloaded · %d routes active\n", len(routes))
+		printSuccess(stdout, fmt.Sprintf("proxy reloaded · %d routes active", len(routes)))
 	} else {
-		fmt.Fprintln(stderr, "note: no daemon running; start it with `gate daemon start`")
+		printInfo(stderr, "note: no daemon running; start it with `gate daemon start`")
 	}
 	return ExitOK
 }
@@ -361,7 +361,7 @@ func Down(args []string, stdout, stderr io.Writer) int {
 	if *jsonOut {
 		return writeJSON(stdout, map[string]any{"project": project.Name, "down": true})
 	}
-	fmt.Fprintf(stdout, "%s down (reservations preserved)\n", project.Name)
+	printSuccess(stdout, project.Name+" down (reservations preserved)")
 	return ExitOK
 }
 
@@ -427,8 +427,16 @@ func downExistingScope(sel registryScopeSelection, stdout, stderr io.Writer, jso
 		}
 		return writeJSON(stdout, out)
 	}
-	fmt.Fprintf(stdout, "%s down (reservations preserved)\n", scope.String())
+	printSuccess(stdout, scope.String()+" down (reservations preserved)")
 	return ExitOK
+}
+
+func printRoute(stdout io.Writer, owner, domain string, port int) {
+	if richOut(stdout, false) {
+		printKV(stdout, owner, fmt.Sprintf("%s -> :%d", domain, port))
+		return
+	}
+	fmt.Fprintf(stdout, "%s  %s -> :%d\n", owner, domain, port)
 }
 
 func reservationsFromRegistry(reservations []registry.Reservation) []projectReservation {

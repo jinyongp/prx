@@ -148,11 +148,7 @@ func Ls(args []string, stdout, stderr io.Writer) int {
 		return writeJSON(stdout, map[string]any{"services": rows})
 	}
 	if len(rows) == 0 {
-		if richOut(stdout, false) {
-			fmt.Fprintln(stdout, ui.Dim.Render("No reservations yet — run `gate up` in a project or `gate add <service> <domain> <port>`."))
-		} else {
-			fmt.Fprintln(stdout, "No reservations.")
-		}
+		printEmpty(stdout, "No reservations yet — run `gate up` in a project or `gate add <service> <domain> <port>`.", "No reservations.")
 		return ExitOK
 	}
 	if richOut(stdout, false) {
@@ -250,11 +246,7 @@ func listPorts(stdout, stderr io.Writer, jsonOut bool, sel registryScopeSelectio
 		return writeJSON(stdout, map[string]any{"ports": rows})
 	}
 	if len(rows) == 0 {
-		if richOut(stdout, false) {
-			fmt.Fprintln(stdout, ui.Dim.Render("No reserved ports yet — run `gate up` in a project or `gate add <service> <domain> <port>`."))
-		} else {
-			fmt.Fprintln(stdout, "No reserved ports.")
-		}
+		printEmpty(stdout, "No reserved ports yet — run `gate up` in a project or `gate add <service> <domain> <port>`.", "No reserved ports.")
 		return ExitOK
 	}
 	if richOut(stdout, false) {
@@ -428,7 +420,7 @@ func Add(args []string, stdout, stderr io.Writer) int {
 	if *jsonOut {
 		return writeJSON(stdout, map[string]any{"project": project.Name, "service": res.Service, "domain": domain, "port": p, "reserved": true})
 	}
-	fmt.Fprintf(stdout, "reserved  %s/%s  %s -> :%d\n", project.Name, name, domain, p)
+	printSuccess(stdout, fmt.Sprintf("reserved %s/%s  %s -> :%d", project.Name, name, domain, p))
 	return ExitOK
 }
 
@@ -488,7 +480,7 @@ func addStandalone(res registry.Reservation, stdout, stderr io.Writer, jsonOut b
 	if jsonOut {
 		return writeJSON(stdout, map[string]any{"service": res.Service, "domain": res.Domain, "port": res.Port, "reserved": true, "standalone": true})
 	}
-	fmt.Fprintf(stdout, "reserved  %s  %s -> :%d\n", res.Service, res.Domain, res.Port)
+	printSuccess(stdout, fmt.Sprintf("reserved %s  %s -> :%d", res.Service, res.Domain, res.Port))
 	return ExitOK
 }
 
@@ -581,7 +573,7 @@ func rmCurrentProjectService(sel registryScopeSelection, name string, stdout, st
 	if jsonOut {
 		return writeJSON(stdout, map[string]any{"scope": daemonScopeProject, "project": project.Name, "service": name, "removed": true})
 	}
-	fmt.Fprintf(stdout, "removed  %s/%s\n", project.Name, name)
+	printSuccess(stdout, fmt.Sprintf("removed %s/%s", project.Name, name))
 	return ExitOK
 }
 
@@ -629,7 +621,7 @@ func rmScopedReservation(sel registryScopeSelection, name string, stdout, stderr
 		}
 		return writeJSON(stdout, out)
 	}
-	fmt.Fprintf(stdout, "removed  %s\n", displayReservationOwner(removedRes))
+	printSuccess(stdout, "removed "+displayReservationOwner(removedRes))
 	return ExitOK
 }
 
@@ -889,7 +881,7 @@ func Clear(args []string, stdout, stderr io.Writer) int {
 		}
 		return writeJSON(stdout, out)
 	}
-	fmt.Fprintf(stdout, "removed %s (%d reservations)\n", clearScopeLabel(scope), len(removed))
+	printSuccess(stdout, fmt.Sprintf("removed %s (%d reservations)", clearScopeLabel(scope), len(removed)))
 	return ExitOK
 }
 
@@ -897,13 +889,17 @@ func confirmClear(sel registryScopeSelection, count int, stdout, stderr io.Write
 	if jsonOut || !stdinIsTTYFunc() {
 		return fail(stderr, jsonOut, ExitUsage, "confirmation_required", "pass -y to clear reservations")
 	}
-	fmt.Fprintf(stdout, "remove %s (%d reservations)? type y or yes: ", clearScopeLabel(sel.Scope), count)
-	line, err := bufio.NewReader(os.Stdin).ReadString('\n')
+	label := fmt.Sprintf("Remove %s (%d reservations)?", clearScopeLabel(sel.Scope), count)
+	answer, err := promptInput(bufio.NewReader(os.Stdin), stdout, promptInputSpec{
+		Label:       label,
+		Default:     "no",
+		Placeholder: "no",
+		Normalize:   normalizeConfirmAnswer,
+	})
 	if err != nil {
 		return fail(stderr, false, ExitError, "confirm_failed", err.Error())
 	}
-	answer := strings.ToLower(strings.TrimSpace(line))
-	if answer != "y" && answer != "yes" {
+	if answer != "yes" {
 		return fail(stderr, false, ExitError, "cancelled", "clear cancelled")
 	}
 	return ExitOK
@@ -943,7 +939,7 @@ func Prune(args []string, stdout, stderr io.Writer) int {
 		}
 		return writeJSON(stdout, map[string]any{"pruned": out})
 	}
-	fmt.Fprintf(stdout, "pruned %d stale reservations\n", len(removed))
+	printSuccess(stdout, fmt.Sprintf("pruned %d stale reservations", len(removed)))
 	return ExitOK
 }
 

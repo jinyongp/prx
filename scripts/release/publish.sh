@@ -28,7 +28,7 @@ show_cursor() {
 abort_interrupted() {
   show_cursor
   printf '\n'
-  echo "Aborted."
+  ui_note "Aborted."
   exit 130
 }
 
@@ -57,7 +57,7 @@ while [ "$#" -gt 0 ]; do
       ;;
     --since)
       if [ "$#" -eq 0 ]; then
-        echo "--since requires a tag"
+        ui_error "--since requires a tag"
         exit 1
       fi
       NOTES_BASE_OVERRIDE="$1"
@@ -71,8 +71,8 @@ while [ "$#" -gt 0 ]; do
       TAG_INPUT="$arg"
       ;;
     *)
-      echo "Unknown argument: $arg"
-      echo "Usage: scripts/release/publish.sh [--dry-run|-n] [--yes|-y] [--since vX.Y.Z] [patch|minor|major|vX.Y.Z]"
+      ui_error "Unknown argument: $arg"
+      ui_note_err "Usage: scripts/release/publish.sh [--dry-run|-n] [--yes|-y] [--since vX.Y.Z] [patch|minor|major|vX.Y.Z]"
       exit 1
       ;;
   esac
@@ -180,7 +180,7 @@ next_version() {
       patch=$((patch + 1))
       ;;
     *)
-      echo "Unknown bump type: $bump" >&2
+      ui_error "Unknown bump type: $bump"
       exit 1
       ;;
   esac
@@ -371,7 +371,7 @@ select_bump_text() {
         return
         ;;
       *)
-        echo "Please enter patch, minor, or major."
+        ui_warn "Please enter patch, minor, or major."
         ;;
     esac
   done
@@ -388,7 +388,7 @@ select_bump_radio() {
   fi
 
   selected="$(bump_index "$RECOMMENDED_BUMP")"
-  printf '  Use arrow keys and Enter.\n'
+  ui_note "Use arrow keys and Enter."
   hide_cursor
   render_bump_menu "$selected"
 
@@ -464,14 +464,15 @@ select_bump() {
 # run_checks runs the full gate quietly, collapsing its output to a single
 # status line on success and only surfacing the detail when something fails.
 run_checks() {
-  printf '\nRunning checks (test, lint, vuln)... '
+  ui_section "Checks"
+  ui_note "Running test, lint, vuln"
   local out
   if out="$(just check 2>&1)"; then
-    ui_ok
+    ui_ok "checks passed"
   else
-    echo "failed"
+    ui_error "checks failed"
     printf '\n%s\n\n' "$out"
-    echo "Checks failed; aborting release."
+    ui_note_err "Checks failed; aborting release."
     exit 1
   fi
 }
@@ -512,8 +513,11 @@ confirm_dirty_tree() {
   local changes="$1"
 
   ui_section "Uncommitted changes"
-  printf '%s\n' "$changes" | sed 's/^/  /'
-  echo
+  while IFS= read -r change; do
+    [ -n "$change" ] || continue
+    ui_item "$change"
+  done <<<"$changes"
+  printf '\n'
 
   if [ "$DRY_RUN" -eq 1 ]; then
     ui_dim "This is a dry run; no tag or push will be created."
@@ -522,14 +526,14 @@ confirm_dirty_tree() {
   fi
 
   if [ "$AUTO_PUSH" -eq 1 ] || [ -n "${CI:-}" ]; then
-    echo "Dirty working tree requires interactive confirmation; aborting release."
+    ui_error "Dirty working tree requires interactive confirmation; aborting release."
     exit 1
   fi
 
   ui_prompt "Continue with dirty working tree? [y/N]:"
   if ! read -r response; then
-    echo
-    echo "No response; aborting release."
+    printf '\n'
+    ui_error "No response; aborting release."
     exit 1
   fi
 
@@ -539,7 +543,7 @@ confirm_dirty_tree() {
       return 0
       ;;
     *)
-      echo "Aborted. Commit or stash changes before releasing."
+      ui_note "Aborted. Commit or stash changes before releasing."
       exit 0
       ;;
   esac
@@ -551,24 +555,24 @@ if [ -n "$DIRTY_CHANGES" ]; then
 fi
 
 if ! sync_tags; then
-  echo "Failed to fetch tags from origin; aborting to avoid releasing from stale local tags."
+  ui_error "Failed to fetch tags from origin; aborting to avoid releasing from stale local tags."
   exit 1
 fi
 
 LATEST_PUBLISHED_TAG=""
 if [ "$NOTES_BASE_OVERRIDE_SET" -eq 1 ]; then
   if [[ ! "$NOTES_BASE_OVERRIDE" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-    echo "--since must be a semver tag like v1.2.3"
+    ui_error "--since must be a semver tag like v1.2.3"
     exit 1
   fi
   if ! git rev-parse -q --verify "refs/tags/$NOTES_BASE_OVERRIDE" >/dev/null; then
-    echo "--since tag does not exist locally: $NOTES_BASE_OVERRIDE"
+    ui_error "--since tag does not exist locally: $NOTES_BASE_OVERRIDE"
     exit 1
   fi
   LATEST_PUBLISHED_TAG="$NOTES_BASE_OVERRIDE"
 else
   if ! LATEST_PUBLISHED_TAG="$(get_latest_published_release_tag)"; then
-    echo "Failed to read latest published GitHub release; use --since vX.Y.Z to set the release notes base explicitly."
+    ui_error "Failed to read latest published GitHub release; use --since vX.Y.Z to set the release notes base explicitly."
     exit 1
   fi
   if [ -n "$LATEST_PUBLISHED_TAG" ] && ! git rev-parse -q --verify "refs/tags/$LATEST_PUBLISHED_TAG" >/dev/null; then
@@ -586,7 +590,7 @@ if [ -z "$TAG_INPUT" ]; then
     LATEST_TAG="$BASE_TAG"
     RANGE=""
     ui_section "Release base"
-    printf '  No previous release tag found. First semver tag starts from v0.0.0.\n'
+    ui_note "No previous release tag found. First semver tag starts from v0.0.0."
   else
     BASE_TAG="$LATEST_TAG"
     RANGE="${LATEST_TAG}..HEAD"
@@ -596,12 +600,15 @@ if [ -z "$TAG_INPUT" ]; then
 
   ui_section "Version commits since $LATEST_TAG"
   COMMITS="$(format_commits "$RANGE")"
-  echo "$COMMITS" | sed 's/^/  - /'
+  while IFS= read -r commit; do
+    [ -n "$commit" ] || continue
+    ui_item "$commit"
+  done <<<"$COMMITS"
   CHANGE_COUNT="$(printf '%s\n' "$COMMITS" | sed '/^$/d' | wc -l | tr -d ' ')"
 
   if [ "$CHANGE_COUNT" -eq 0 ]; then
-    echo
-    echo "No commits to release."
+    printf '\n'
+    ui_note "No commits to release."
     exit 0
   fi
 
@@ -635,7 +642,10 @@ else
   ui_section "Release base"
   ui_kv "Last tag" "$LATEST_TAG"
   ui_section "Version commits since $LATEST_TAG"
-  format_commits "$RANGE" | sed 's/^/  - /'
+  while IFS= read -r commit; do
+    [ -n "$commit" ] || continue
+    ui_item "$commit"
+  done <<<"$(format_commits "$RANGE")"
 fi
 
 ui_section "Release notes base"
@@ -648,7 +658,10 @@ else
   ui_kv "Last published release" "none"
 fi
 ui_section "Release notes commits"
-format_commits "$NOTES_RANGE" | sed 's/^/  - /'
+while IFS= read -r commit; do
+  [ -n "$commit" ] || continue
+  ui_item "$commit"
+done <<<"$(format_commits "$NOTES_RANGE")"
 
 case "$TAG_INPUT" in
   patch|minor|major)
@@ -657,7 +670,7 @@ case "$TAG_INPUT" in
     ;;
   *)
     if [[ ! "$TAG_INPUT" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-      echo "Tag must be vX.Y.Z or one of: patch, minor, major"
+      ui_error "Tag must be vX.Y.Z or one of: patch, minor, major"
       exit 1
     fi
 
@@ -671,19 +684,19 @@ if [ "${TAG_INPUT}" != "${PATCH_TAG}" ]; then
 fi
 
 if [ "$(git symbolic-ref --short HEAD)" != "main" ]; then
-  echo "release must run on branch 'main'."
+  ui_error "release must run on branch 'main'."
   exit 1
 fi
 
 TARGET_SHA="$(git rev-parse HEAD)"
 
 if git rev-parse -q --verify "refs/tags/$PATCH_TAG" >/dev/null; then
-  echo "Tag already exists: $PATCH_TAG"
+  ui_error "Tag already exists: $PATCH_TAG"
   exit 1
 fi
 
 if [ "$DRY_RUN" -eq 0 ] && git ls-remote --exit-code --tags origin "refs/tags/$PATCH_TAG" >/dev/null 2>&1; then
-  echo "Remote tag already exists: $PATCH_TAG"
+  ui_error "Remote tag already exists: $PATCH_TAG"
   exit 1
 fi
 
@@ -691,18 +704,18 @@ if [ "$DRY_RUN" -eq 1 ]; then
   ui_section "Dry run"
   ui_kv "Tag" "$PATCH_TAG"
   ui_kv "Target" "$TARGET_SHA"
-  echo "  No tag or push was created."
+  ui_note "No tag or push was created."
   exit 0
 fi
 
 run_checks
 
 if ! confirm_push "$PATCH_TAG" "$AUTO_PUSH"; then
-  echo "Aborted. No tag created."
+  ui_note "Aborted. No tag created."
   exit 0
 fi
 
 RELEASE_NOTES="$(printf 'Release %s\n\n%s' "$PATCH_TAG" "$(format_commits "$NOTES_RANGE" | sed 's/^/- /')")"
 git tag -a "$PATCH_TAG" -m "$RELEASE_NOTES" "$TARGET_SHA"
 git push --atomic origin HEAD:main "refs/tags/$PATCH_TAG:refs/tags/$PATCH_TAG"
-echo "Created and pushed tag $PATCH_TAG"
+ui_ok "created and pushed tag $PATCH_TAG"

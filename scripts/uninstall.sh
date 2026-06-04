@@ -18,6 +18,9 @@ else
   ui_ok() { printf 'ok: %s\n' "$1"; }
   ui_error() { printf 'error: %s\n' "$1" >&2; }
   ui_prompt() { printf '\n%s ' "$1"; }
+  ui_subsection() { printf '  %s\n' "$1"; }
+  ui_item() { printf '  - %s\n' "$1"; }
+  ui_note() { printf '%s\n' "$1"; }
 fi
 
 for arg in "$@"; do
@@ -29,7 +32,7 @@ for arg in "$@"; do
       KEEP_TRUST=1
       ;;
     -h|--help)
-      echo "Usage: sh uninstall.sh [--yes|--force|-y] [--keep-trust]" >&2
+      ui_note "Usage: sh uninstall.sh [--yes|--force|-y] [--keep-trust]" >&2
       exit 0
       ;;
     *)
@@ -142,24 +145,28 @@ sort -u "$WORKFILE" > "$SORTED_FILE"
 if [ -s "$SORTED_FILE" ] || [ -s "$CLEANUP_FILE" ]; then
   ui_section "Discovered artifacts"
   if [ -s "$SORTED_FILE" ]; then
-    printf '  Existing paths to remove:\n'
-    sed 's/^/  - /' "$SORTED_FILE"
+    ui_subsection "Existing paths to remove"
+    while IFS= read -r target; do
+      ui_item "$target"
+    done < "$SORTED_FILE"
   fi
   if [ -s "$CLEANUP_FILE" ]; then
-    printf '  Cleanup actions:\n'
-    sed 's/^/  - /' "$CLEANUP_FILE"
+    ui_subsection "Cleanup actions"
+    while IFS= read -r action; do
+      ui_item "$action"
+    done < "$CLEANUP_FILE"
   fi
   if [ "$FORCE" -ne 1 ]; then
     ui_prompt "Type y to proceed, anything else to cancel [y/N]:"
     if ! read -r response; then
-      echo "Uninstall canceled."
+      ui_note "Uninstall canceled."
       exit 0
     fi
     case "$response" in
       y|Y|yes|Yes|YES)
-        ;;
+      ;;
       *)
-        echo "Uninstall canceled."
+        ui_note "Uninstall canceled."
         exit 0
         ;;
     esac
@@ -400,7 +407,7 @@ fi
 
 if [ "$FOUND" -eq 0 ]; then
   ui_section "Uninstall complete"
-  echo "No gate installation artifacts found."
+  ui_note "No gate installation artifacts found."
   exit 0
 fi
 

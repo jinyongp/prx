@@ -13,6 +13,10 @@ else
   ui_ok() { printf 'ok: %s\n' "$1"; }
   ui_warn_err() { printf 'warning: %s\n' "$1" >&2; }
   ui_error() { printf 'error: %s\n' "$1" >&2; }
+  ui_note() { printf '%s\n' "$1"; }
+  ui_note_err() { printf '%s\n' "$1" >&2; }
+  ui_command() { printf '  %s\n' "$1"; }
+  ui_prompt() { printf '\n%s ' "$1"; }
 fi
 
 OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
@@ -22,7 +26,7 @@ case "$OS" in
   darwin|linux) ;;
   *)
     ui_error "unsupported OS: $OS"
-    echo "supported OS: darwin, linux" >&2
+    ui_note_err "supported OS: darwin, linux"
     exit 1
     ;;
 esac
@@ -34,7 +38,7 @@ case "$ARCH_RAW" in
     ARCH="arm64" ;;
   *)
     ui_error "unsupported architecture: $ARCH_RAW"
-    echo "supported architecture: amd64, arm64" >&2
+    ui_note_err "supported architecture: amd64, arm64"
     exit 1
     ;;
 esac
@@ -68,7 +72,7 @@ resolve_download_url() {
     return 1
   fi
 
-  ASSET_URLS="$(sed -n 's/.*\"browser_download_url\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p' "$RELEASE_JSON")"
+  ASSET_URLS="$(tr ',' '\n' < "$RELEASE_JSON" | sed -n 's/.*\"browser_download_url\"[[:space:]]*:[[:space:]]*\"\([^\"]*\)\".*/\1/p')"
 
   if [ -z "$ASSET_URLS" ]; then
     return 1
@@ -83,53 +87,6 @@ resolve_download_url() {
   fi
 
   return 1
-}
-
-build_from_source() {
-  if ! command -v git >/dev/null 2>&1; then
-    ui_error "no prebuilt release was found and 'git' is missing."
-    echo "Install git, or publish a release with artifacts for ${BINARY_NAME}." >&2
-    return 1
-  fi
-
-  if ! command -v go >/dev/null 2>&1; then
-    ui_error "no prebuilt release was found and 'go' is missing."
-    echo "Install Go, or publish a release with artifacts for ${BINARY_NAME}." >&2
-    return 1
-  fi
-
-  SOURCE_DIR="${TMP_DIR}/source"
-  CLONE_URL="https://github.com/${REPO}.git"
-
-  if [ "$VERSION" = "latest" ]; then
-    if ! git clone --quiet --depth 1 "$CLONE_URL" "$SOURCE_DIR" >/dev/null 2>&1; then
-      ui_error "failed to clone ${REPO} (latest)"
-      return 1
-    fi
-  else
-    if ! git clone --quiet --depth 1 --branch "$VERSION" "$CLONE_URL" "$SOURCE_DIR" >/dev/null 2>&1; then
-      if ! git clone --quiet --depth 1 "$CLONE_URL" "$SOURCE_DIR" >/dev/null 2>&1; then
-        ui_error "failed to clone ${REPO} for tag ${VERSION}"
-        return 1
-      fi
-      if ! (cd "$SOURCE_DIR" && git checkout "$VERSION" >/dev/null 2>&1); then
-        ui_error "release version ${VERSION} not found (tag or branch)."
-        return 1
-      fi
-    fi
-  fi
-
-  build_version="$VERSION"
-  if [ "$build_version" = "latest" ]; then
-    build_version="$(cd "$SOURCE_DIR" && git describe --tags --always 2>/dev/null || echo dev)"
-  fi
-
-  if ! (cd "$SOURCE_DIR" && go build -trimpath -ldflags "-s -w -X main.version=${build_version}" -o "$BINARY_PATH" ./cmd/gate); then
-    ui_error "failed to build gate from source."
-    return 1
-  fi
-
-  return 0
 }
 
 verify_checksum() {
@@ -162,8 +119,8 @@ verify_checksum() {
 
   if [ "$actual" != "$expected" ]; then
     ui_error "checksum verification failed for ${asset_name}."
-    echo "  expected: ${expected}" >&2
-    echo "  actual:   ${actual}" >&2
+    ui_note_err "expected: ${expected}"
+    ui_note_err "actual:   ${actual}"
     return 1
   fi
 
@@ -171,15 +128,18 @@ verify_checksum() {
   return 0
 }
 
-if resolve_download_url; then
-  if curl -fsSL "$DOWNLOAD_URL" -o "$BINARY_PATH"; then
-    verify_checksum
-  else
-    build_from_source
-  fi
-else
-  build_from_source
+if ! resolve_download_url; then
+  ui_error "no prebuilt release asset found for ${BINARY_NAME}."
+  ui_note_err "Publish a GitHub release with ${BINARY_NAME}, or set GATE_VERSION to a release tag that has it."
+  exit 1
 fi
+
+if ! curl -fsSL "$DOWNLOAD_URL" -o "$BINARY_PATH"; then
+  ui_error "failed to download ${BINARY_NAME}."
+  exit 1
+fi
+
+verify_checksum
 
 if [ ! -f "$BINARY_PATH" ]; then
   ui_error "no installable binary found."
@@ -197,7 +157,7 @@ elif [ -w "$HOME/.local/bin" ] || mkdir -p "$HOME/.local/bin"; then
   DEST_DIR="$HOME/.local/bin"
 else
   ui_error "no writable install directory found."
-  echo "Grant permissions or use a custom destination in your shell manually." >&2
+  ui_note_err "Grant permissions or use a custom destination in your shell manually."
   exit 1
 fi
 
@@ -280,18 +240,18 @@ print_path_instructions() {
   rc_file="$2"
   cmd="$3"
   ui_section "PATH setup"
-  echo "gate was installed, but ${DEST_DIR} is not in PATH for this terminal."
+  ui_note "gate was installed, but ${DEST_DIR} is not in PATH for this terminal."
   if [ -n "$rc_file" ]; then
-    echo "Add this to ${rc_file}:"
+    ui_note "Add this to ${rc_file}:"
   else
-    echo "Add this to your shell startup file:"
+    ui_note "Add this to your shell startup file:"
   fi
-  echo
-  echo "  ${cmd}"
-  echo
-  echo "Then open a new terminal, or run the line above in the current shell."
+  printf '\n'
+  ui_command "${cmd}"
+  printf '\n'
+  ui_note "Then open a new terminal, or run the line above in the current shell."
   if [ "$shell_name" = "fish" ]; then
-    echo "Detected shell: fish"
+    ui_note "Detected shell: fish"
   fi
 }
 
@@ -324,21 +284,21 @@ configure_path() {
 
   if [ -f "$rc_file" ] && { grep -F "$DEST_DIR" "$rc_file" >/dev/null 2>&1 || grep -F "$entry" "$rc_file" >/dev/null 2>&1; }; then
     ui_ok "${DEST_DIR} is already listed in ${rc_file}."
-    echo "Open a new terminal, or run:"
-    echo "  ${cmd}"
+    ui_note "Open a new terminal, or run:"
+    ui_command "${cmd}"
     return
   fi
 
   ui_warn_err "PATH does not currently include ${DEST_DIR}."
   if [ -r /dev/tty ] && [ -w /dev/tty ]; then
-    printf '\nAdd %s to PATH in %s? [Y/n]: ' "$DEST_DIR" "$rc_file" > /dev/tty
+    ui_prompt "Add ${DEST_DIR} to PATH in ${rc_file}? [Y/n]:" > /dev/tty
     if IFS= read -r response < /dev/tty; then
       case "$response" in
         ""|y|Y|yes|Yes|YES)
           if append_path_to_rc "$rc_file" "$cmd"; then
             ui_ok "updated ${rc_file}."
-            echo "Open a new terminal, or run:"
-            echo "  ${cmd}"
+            ui_note "Open a new terminal, or run:"
+            ui_command "${cmd}"
             return
           fi
           ui_warn_err "could not update ${rc_file}."
@@ -358,6 +318,6 @@ configure_path
 resolved="$(command -v gate 2>/dev/null || true)"
 if [ -n "$resolved" ] && [ "$resolved" != "$DEST" ]; then
   ui_warn_err "another gate is earlier in PATH and will shadow this install:"
-  echo "  ${resolved}"
-  echo "Remove it, or reorder PATH so ${DEST_DIR} comes first."
+  ui_command "${resolved}"
+  ui_note "Remove it, or reorder PATH so ${DEST_DIR} comes first."
 fi

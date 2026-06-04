@@ -15,6 +15,7 @@ import (
 	"gate/internal/ca"
 	"gate/internal/dns"
 	"gate/internal/paths"
+	"gate/internal/ui"
 )
 
 var (
@@ -43,7 +44,7 @@ func Uninstall(args []string, stdout, stderr io.Writer) int {
 	targets := collectUninstallTargets()
 	actions := collectUninstallActions(*keepTrust, !*keepBrew && isCurrentHomebrewGate())
 	if len(targets) == 0 && len(actions) == 0 {
-		fmt.Fprintln(stdout, "No gate installation artifacts found.")
+		printInfo(stdout, "No gate installation artifacts found.")
 		return ExitOK
 	}
 	if !yes {
@@ -72,10 +73,10 @@ func Uninstall(args []string, stdout, stderr io.Writer) int {
 	if !*keepTrust {
 		switch ok := uninstallTrust(stdout, stderr); ok {
 		case uninstallStepFailed:
-			fmt.Fprintln(stderr, "error: gate uninstall completed with errors.")
+			printError(stderr, "gate uninstall completed with errors.")
 			return ExitError
 		case uninstallStepPermission:
-			fmt.Fprintln(stderr, "error: gate uninstall completed with errors.")
+			printError(stderr, "gate uninstall completed with errors.")
 			return ExitPerm
 		case uninstallStepChanged:
 			found = true
@@ -94,26 +95,26 @@ func Uninstall(args []string, stdout, stderr io.Writer) int {
 	}
 	if !*keepBrew && isCurrentHomebrewGate() {
 		if err := uninstallRunHomebrewFunc(stdout, stderr); err != nil {
-			fmt.Fprintf(stderr, "error: failed to uninstall Homebrew package: %v\n", err)
+			printError(stderr, "failed to uninstall Homebrew package: "+err.Error())
 			failed = true
 		} else {
-			fmt.Fprintln(stdout, "removed Homebrew package gate")
+			printUninstallStep(stdout, "removed Homebrew package gate")
 			found = true
 		}
 	}
 
 	if failed {
-		fmt.Fprintln(stderr, "error: gate uninstall completed with errors.")
+		printError(stderr, "gate uninstall completed with errors.")
 		if permissionFailed {
 			return ExitPerm
 		}
 		return ExitError
 	}
 	if !found {
-		fmt.Fprintln(stdout, "No gate installation artifacts found.")
+		printInfo(stdout, "No gate installation artifacts found.")
 		return ExitOK
 	}
-	fmt.Fprintln(stdout, "gate uninstalled.")
+	printOK(stdout, "gate uninstalled.")
 	return ExitOK
 }
 
@@ -186,6 +187,14 @@ func collectUninstallActions(keepTrust, removeBrew bool) []string {
 }
 
 func printUninstallPlan(stdout io.Writer, targets, actions []string) {
+	if richOut(stdout, false) {
+		printUninstallPlanRich(stdout, targets, actions)
+		return
+	}
+	printUninstallPlanPlain(stdout, targets, actions)
+}
+
+func printUninstallPlanPlain(stdout io.Writer, targets, actions []string) {
 	fmt.Fprintln(stdout, "Discovered artifacts")
 	if len(targets) > 0 {
 		fmt.Fprintln(stdout, "  Existing paths to remove:")
@@ -201,19 +210,50 @@ func printUninstallPlan(stdout io.Writer, targets, actions []string) {
 	}
 }
 
+func printUninstallPlanRich(stdout io.Writer, targets, actions []string) {
+	fmt.Fprintln(stdout, ui.Header.Render("Discovered artifacts"))
+	if len(targets) > 0 {
+		fmt.Fprintf(stdout, "  %s\n", ui.Dim.Render("Existing paths to remove"))
+		for _, target := range targets {
+			fmt.Fprintf(stdout, "  %s %s\n", ui.Tint(ui.Brand, "-"), target)
+		}
+	}
+	if len(actions) > 0 {
+		fmt.Fprintf(stdout, "  %s\n", ui.Dim.Render("Cleanup actions"))
+		for _, action := range actions {
+			fmt.Fprintf(stdout, "  %s %s\n", ui.Tint(ui.Brand, "-"), action)
+		}
+	}
+}
+
 func confirmUninstall(stdout io.Writer) bool {
-	fmt.Fprint(stdout, "\nType y to proceed, anything else to cancel [y/N]: ")
-	reader := bufio.NewReader(os.Stdin)
-	response, err := reader.ReadString('\n')
-	if err != nil && !errors.Is(err, io.EOF) {
+	confirmed, err := confirmUninstallPrompt(bufio.NewReader(os.Stdin), stdout)
+	if err != nil {
 		return false
 	}
-	switch strings.TrimSpace(response) {
-	case "y", "Y", "yes", "Yes", "YES":
-		return true
-	default:
-		return false
+	return confirmed
+}
+
+func confirmUninstallPrompt(reader *bufio.Reader, stdout io.Writer) (bool, error) {
+	fmt.Fprintln(stdout)
+	value, err := promptInput(reader, stdout, promptInputSpec{
+		Label:       "Proceed with uninstall?",
+		Default:     "no",
+		Placeholder: "no",
+		Normalize:   normalizeConfirmAnswer,
+	})
+	if err != nil {
+		return false, err
 	}
+	return value == "yes", nil
+}
+
+func printUninstallStep(stdout io.Writer, message string) {
+	if richOut(stdout, false) {
+		fmt.Fprintf(stdout, "%s %s\n", ui.Tint(ui.Success, "ok:"), message)
+		return
+	}
+	fmt.Fprintln(stdout, message)
 }
 
 func uninstallTrust(stdout, stderr io.Writer) uninstallStep {
@@ -222,17 +262,17 @@ func uninstallTrust(stdout, stderr io.Writer) uninstallStep {
 		return uninstallStepNoop
 	}
 	if err != nil {
-		fmt.Fprintf(stderr, "error: failed to load gate root CA: %v\n", err)
+		printError(stderr, "failed to load gate root CA: "+err.Error())
 		return uninstallStepFailed
 	}
 	if err := untrustAuthorityFunc(authority); err != nil {
-		fmt.Fprintf(stderr, "error: failed to remove trusted gate root CA: %v\n", err)
+		printError(stderr, "failed to remove trusted gate root CA: "+err.Error())
 		if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
 			return uninstallStepPermission
 		}
 		return uninstallStepFailed
 	}
-	fmt.Fprintln(stdout, "removed trusted gate root CA")
+	printUninstallStep(stdout, "removed trusted gate root CA")
 	return uninstallStepChanged
 }
 
@@ -241,12 +281,12 @@ func cleanupPathBlocks(stdout, stderr io.Writer) uninstallStep {
 	for _, rc := range gateShellStartupFiles() {
 		changed, err := removeMarkedBlock(rc, "# >>> gate PATH >>>", "# <<< gate PATH <<<")
 		if err != nil {
-			fmt.Fprintf(stderr, "error: failed to remove gate PATH block from %s: %v\n", rc, err)
+			printError(stderr, fmt.Sprintf("failed to remove gate PATH block from %s: %v", rc, err))
 			result = uninstallStepFailed
 			continue
 		}
 		if changed && result != uninstallStepFailed {
-			fmt.Fprintf(stdout, "removed gate PATH block from %s\n", rc)
+			printUninstallStep(stdout, "removed gate PATH block from "+rc)
 			result = uninstallStepChanged
 		}
 	}
@@ -258,20 +298,20 @@ func cleanupHostsBlock(stdout, stderr io.Writer) uninstallStep {
 		return uninstallStepNoop
 	}
 	if err := (dns.Hosts{Path: uninstallHostsPath}).RemoveManagedBlock(); err != nil {
-		fmt.Fprintf(stderr, "error: failed to remove gate block from %s: %v\n", uninstallHostsPath, err)
+		printError(stderr, fmt.Sprintf("failed to remove gate block from %s: %v", uninstallHostsPath, err))
 		if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
 			return uninstallStepPermission
 		}
 		return uninstallStepFailed
 	}
-	fmt.Fprintf(stdout, "removed gate block from %s\n", uninstallHostsPath)
+	printUninstallStep(stdout, "removed gate block from "+uninstallHostsPath)
 	return uninstallStepChanged
 }
 
 func stopAllKnownDaemons(stdout, stderr io.Writer) uninstallStep {
 	refs, err := allListenerRefs()
 	if err != nil {
-		fmt.Fprintf(stderr, "error: failed to list daemons: %v\n", err)
+		printError(stderr, "failed to list daemons: "+err.Error())
 		return uninstallStepFailed
 	}
 	result := uninstallStepNoop
@@ -300,16 +340,16 @@ func removeTargets(targets []string, stdout, stderr io.Writer) bool {
 			if os.IsNotExist(err) {
 				continue
 			}
-			fmt.Fprintf(stderr, "error: failed to inspect %s: %v\n", target, err)
+			printError(stderr, fmt.Sprintf("failed to inspect %s: %v", target, err))
 			ok = false
 			continue
 		}
 		if err := os.RemoveAll(target); err != nil {
-			fmt.Fprintf(stderr, "error: failed to remove %s: %v\n", target, err)
+			printError(stderr, fmt.Sprintf("failed to remove %s: %v", target, err))
 			ok = false
 			continue
 		}
-		fmt.Fprintf(stdout, "removed %s\n", target)
+		printUninstallStep(stdout, "removed "+target)
 	}
 	return ok
 }

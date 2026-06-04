@@ -70,13 +70,72 @@ type errEnvelope struct {
 // fail reports an error: a JSON envelope on stderr under --json, else a plain
 // line. It returns code so callers can `return fail(...)`.
 func fail(stderr io.Writer, jsonOut bool, code int, errCode, msg string) int {
-	if jsonOut {
+	switch {
+	case jsonOut:
 		enc := json.NewEncoder(stderr)
 		_ = enc.Encode(errEnvelope{Error: errBody{Code: errCode, Message: msg}})
-	} else {
+	case richOut(stderr, false):
+		fmt.Fprintf(stderr, "%s %s\n", ui.Tint(ui.Danger, "gate:"), msg)
+	default:
 		fmt.Fprintf(stderr, "gate: %s\n", msg)
 	}
 	return code
+}
+
+func printSuccess(stdout io.Writer, msg string) {
+	if richOut(stdout, false) {
+		fmt.Fprintf(stdout, "%s %s\n", ui.Tint(ui.Success, "✓"), msg)
+		return
+	}
+	fmt.Fprintln(stdout, msg)
+}
+
+func printOK(stdout io.Writer, msg string) {
+	if richOut(stdout, false) {
+		fmt.Fprintf(stdout, "%s %s\n", ui.Tint(ui.Success, "ok:"), msg)
+		return
+	}
+	fmt.Fprintln(stdout, msg)
+}
+
+func printInfo(stdout io.Writer, msg string) {
+	if richOut(stdout, false) {
+		fmt.Fprintln(stdout, ui.Dim.Render(msg))
+		return
+	}
+	fmt.Fprintln(stdout, msg)
+}
+
+func printEmpty(stdout io.Writer, richMsg, plainMsg string) {
+	if richOut(stdout, false) {
+		fmt.Fprintln(stdout, ui.Dim.Render(richMsg))
+		return
+	}
+	fmt.Fprintln(stdout, plainMsg)
+}
+
+func printWarning(stderr io.Writer, msg string) {
+	if richOut(stderr, false) {
+		fmt.Fprintf(stderr, "%s %s\n", ui.Tint(ui.Warn, "!"), msg)
+		return
+	}
+	fmt.Fprintf(stderr, "warning: %s\n", msg)
+}
+
+func printError(stderr io.Writer, msg string) {
+	if richOut(stderr, false) {
+		fmt.Fprintln(stderr, ui.Tint(ui.Danger, "error:")+" "+msg)
+		return
+	}
+	fmt.Fprintf(stderr, "error: %s\n", msg)
+}
+
+func printKV(stdout io.Writer, label, value string) {
+	if richOut(stdout, false) {
+		fmt.Fprintf(stdout, "  %s  %s\n", ui.Dim.Render(label), value)
+		return
+	}
+	fmt.Fprintf(stdout, "  %s: %s\n", label, value)
 }
 
 func statusDot(status string, color bool) string {

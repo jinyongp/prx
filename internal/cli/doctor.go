@@ -95,7 +95,7 @@ func doctorReportOK(report doctorReport) bool {
 
 func printDoctorReport(stdout io.Writer, report doctorReport, fix bool) {
 	if len(report.Issues) == 0 {
-		fmt.Fprintln(stdout, "ok · no issues found")
+		printOK(stdout, "no issues found")
 		return
 	}
 	for _, issue := range report.Issues {
@@ -103,17 +103,25 @@ func printDoctorReport(stdout io.Writer, report doctorReport, fix bool) {
 		if issue.Fixed && issue.Error == "" {
 			status = "fixed"
 		}
-		fmt.Fprintf(stdout, "%s · %s · %s\n", status, issue.Code, issue.Message)
+		printDoctorIssue(stdout, status, issue.Code, issue.Message)
 		for _, p := range issue.Paths {
-			fmt.Fprintf(stdout, "  path %s\n", p)
+			printKV(stdout, "path", p)
 		}
 		if issue.Error != "" {
-			fmt.Fprintf(stdout, "  error %s\n", issue.Error)
+			printKV(stdout, "error", issue.Error)
 		}
 	}
 	if !fix && !report.OK {
-		fmt.Fprintln(stdout, "fix: gate doctor --fix")
+		printInfo(stdout, "fix: gate doctor --fix")
 	}
+}
+
+func printDoctorIssue(stdout io.Writer, status, code, message string) {
+	if richOut(stdout, false) {
+		printKV(stdout, status, code+" · "+message)
+		return
+	}
+	fmt.Fprintf(stdout, "%s · %s · %s\n", status, code, message)
 }
 
 func checkLegacyDaemonState(fix bool) (doctorIssue, bool) {

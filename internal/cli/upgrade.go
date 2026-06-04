@@ -245,7 +245,7 @@ func restartDaemonAfterUpgrade(st daemon.Status, stdout, stderr io.Writer) int {
 		return fail(stderr, false, ExitError, "upgrade", "failed to reload daemon routes: "+err.Error())
 	}
 	activity.Stop()
-	fmt.Fprintf(stdout, "daemon restarted · pid %d · https %s · http %s\n", result.PID, httpsAddr, httpAddr)
+	printSuccess(stdout, fmt.Sprintf("daemon restarted · pid %d · https %s · http %s", result.PID, httpsAddr, httpAddr))
 	return ExitOK
 }
 
@@ -281,11 +281,7 @@ func printUpgradeVersion(stdout io.Writer, label, version string) {
 }
 
 func printUpgradeStatus(stdout io.Writer, msg string) {
-	if richOut(stdout, false) {
-		fmt.Fprintf(stdout, "%s %s\n", ui.Tint(ui.Success, "✓"), msg)
-		return
-	}
-	fmt.Fprintln(stdout, msg)
+	printSuccess(stdout, msg)
 }
 
 func printUpgradeCancelled(stdout io.Writer) {
@@ -293,11 +289,7 @@ func printUpgradeCancelled(stdout io.Writer) {
 }
 
 func printUpgradeWarning(stderr io.Writer, msg string) {
-	if richOut(stderr, false) {
-		fmt.Fprintf(stderr, "%s %s\n", ui.Tint(ui.Warn, "!"), msg)
-		return
-	}
-	fmt.Fprintf(stderr, "warning: %s\n", msg)
+	printWarning(stderr, msg)
 }
 
 // confirmUpgrade asks the user to confirm the upgrade on stdin. An empty line

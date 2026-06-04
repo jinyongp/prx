@@ -49,6 +49,26 @@ ui_kv() {
   printf '  %-12s %s\n' "$1" "$2"
 }
 
+ui_subsection() {
+  printf '  %s%s%s\n' "$UI_DIM" "$1" "$UI_RESET"
+}
+
+ui_item() {
+  printf '  %s-%s %s\n' "$UI_GREEN" "$UI_RESET" "$1"
+}
+
+ui_note() {
+  printf '%s%s%s\n' "$UI_DIM" "$1" "$UI_RESET"
+}
+
+ui_note_err() {
+  ui_note "$1" >&2
+}
+
+ui_command() {
+  printf '  %s%s%s\n' "$UI_CYAN" "$1" "$UI_RESET"
+}
+
 ui_ok() {
   if [ "$#" -eq 0 ]; then
     printf '%sok%s\n' "$UI_GREEN" "$UI_RESET"

@@ -16,6 +16,7 @@ import (
 	"gate/internal/paths"
 	"gate/internal/proxy"
 	"gate/internal/registry"
+	"gate/internal/ui"
 )
 
 var (
@@ -48,7 +49,8 @@ func Trust(args []string, stdout, stderr io.Writer) int {
 		}
 		return fail(stderr, false, ExitError, "trust", err.Error())
 	}
-	fmt.Fprintf(stdout, "root CA trusted\nfingerprint %s\n", authority.Fingerprint())
+	printSuccess(stdout, "root CA trusted")
+	printKV(stdout, "fingerprint", authority.Fingerprint())
 	return ExitOK
 }
 
@@ -62,7 +64,7 @@ func Untrust(args []string, stdout, stderr io.Writer) int {
 	authority, err := ca.LoadCertificate(paths.DataDir())
 	activity.Stop()
 	if errors.Is(err, ca.ErrNotFound) {
-		fmt.Fprintln(stdout, "root CA not found; nothing to untrust")
+		printInfo(stdout, "root CA not found; nothing to untrust")
 		return ExitOK
 	}
 	if err != nil {
@@ -74,7 +76,8 @@ func Untrust(args []string, stdout, stderr io.Writer) int {
 		}
 		return fail(stderr, false, ExitError, "untrust", err.Error())
 	}
-	fmt.Fprintf(stdout, "root CA untrusted\nfingerprint %s\n", authority.Fingerprint())
+	printSuccess(stdout, "root CA untrusted")
+	printKV(stdout, "fingerprint", authority.Fingerprint())
 	return ExitOK
 }
 
@@ -102,7 +105,8 @@ func Ca(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, false, ExitError, "export", err.Error())
 	}
-	fmt.Fprintf(stdout, "exported %s\nsha256 %s\n", *out, fp)
+	printSuccess(stdout, "exported "+*out)
+	printKV(stdout, "sha256", fp)
 	return ExitOK
 }
 
@@ -145,7 +149,7 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, *jsonOut, ExitUsage, "bad_provider", err.Error())
 	}
 	if *auth == "" && *via != "local" {
-		fmt.Fprintln(stderr, "warning: exposing without --auth; anyone with the URL can reach your dev server")
+		printWarning(stderr, "exposing without --auth; anyone with the URL can reach your dev server")
 	}
 	var activity activityHandle
 	if exposeActivityAllowed(*via) {
@@ -218,7 +222,8 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 		}
 		return writeJSON(stdout, out)
 	}
-	fmt.Fprintf(stdout, "%s exposed via %s\n  %s -> %s\n", displayReservationOwner(res), *via, result.URL, res.Domain)
+	printSuccess(stdout, fmt.Sprintf("%s exposed via %s", displayReservationOwner(res), *via))
+	printKV(stdout, result.URL, res.Domain)
 	return ExitOK
 }
 
@@ -274,7 +279,18 @@ func exposeLs(args []string, stdout, stderr io.Writer) int {
 		return writeJSON(stdout, map[string]any{"exposures": rows})
 	}
 	if len(rows) == 0 {
-		fmt.Fprintln(stdout, "No exposures.")
+		printEmpty(stdout, "No exposures yet.", "No exposures.")
+		return ExitOK
+	}
+	if richOut(stdout, false) {
+		headers := []string{"SERVICE", "STATUS", "PROVIDER", "PUBLIC URL", "TARGET", "SCOPE", "AUTH"}
+		data := make([][]string, 0, len(rows))
+		for _, row := range rows {
+			data = append(data, []string{
+				row.Service, row.Status, row.Provider, row.PublicURL, row.Target, row.Scope, fmt.Sprintf("%t", row.Auth),
+			})
+		}
+		fmt.Fprintln(stdout, ui.Render(headers, data))
 		return ExitOK
 	}
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
@@ -350,7 +366,7 @@ func exposeStop(args []string, stdout, stderr io.Writer) int {
 	if *jsonOut {
 		return writeJSON(stdout, map[string]any{"removed": true, "service": service, "provider": record.Provider})
 	}
-	fmt.Fprintf(stdout, "stopped exposure  %s via %s\n", service, record.Provider)
+	printSuccess(stdout, fmt.Sprintf("stopped exposure %s via %s", service, record.Provider))
 	return ExitOK
 }
 

@@ -14,7 +14,6 @@ import (
 	"gate/internal/config"
 	portx "gate/internal/port"
 	"gate/internal/registry"
-	"gate/internal/ui"
 
 	"golang.org/x/term"
 )
@@ -73,20 +72,16 @@ func Init(args []string, stdout, stderr io.Writer) int {
 	if *jsonOut {
 		return writeJSON(stdout, map[string]any{"path": path, "project": spec.ProjectName, "created": true})
 	}
-	if richOut(stdout, false) {
-		fmt.Fprintf(stdout, "%s created %s\n", ui.Tint(ui.Success, "✓"), config.Filename)
-	} else {
-		fmt.Fprintf(stdout, "created %s\n", config.Filename)
-	}
-	fmt.Fprintf(stdout, "  project: %s\n", spec.ProjectName)
+	printSuccess(stdout, "created "+config.Filename)
+	printKV(stdout, "project", spec.ProjectName)
 	for _, svc := range spec.Services {
 		if svc.Port == 0 {
-			fmt.Fprintf(stdout, "  service: %s -> %s\n", svc.Name, svc.Domain)
+			printKV(stdout, "service", fmt.Sprintf("%s -> %s", svc.Name, svc.Domain))
 		} else {
-			fmt.Fprintf(stdout, "  service: %s -> %s (:%d)\n", svc.Name, svc.Domain, svc.Port)
+			printKV(stdout, "service", fmt.Sprintf("%s -> %s (:%d)", svc.Name, svc.Domain, svc.Port))
 		}
 	}
-	fmt.Fprintln(stderr, "next: run `gate up -d`")
+	printInfo(stderr, "next: run `gate up -d`")
 	return ExitOK
 }
 
