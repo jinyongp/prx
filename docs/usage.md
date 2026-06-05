@@ -7,6 +7,40 @@ Use project mode when a repository should carry its routing in `gate.toml`.
 Use global reservations when you want a machine-local mapping without adding a
 project file.
 
+## Quick Reference
+
+Use `gate --help` for the root command list, or `gate <command> --help` for one
+command's flags and positional arguments.
+
+| command | purpose |
+| --- | --- |
+| `gate init [--name name] [--force] [-y\|--yes] [--json]` | scaffold a starter `gate.toml` |
+| `gate up [-d\|--daemon] [--dns localhost\|hosts] [-g\|--global] [-p name\|--project name] [--json]` | reserve ports, activate routes, reflect DNS, and optionally start the daemon |
+| `gate down [-g\|--global] [-p name\|--project name] [--json]` | deactivate scoped routes while keeping reservations |
+| `gate ls [--route active\|inactive] [--upstream live\|down] [-g\|--global] [-p name\|--project name] [-a\|--all] [--json]` | list reservations with route and upstream status |
+| `gate port [-g\|--global] [-p name\|--project name] [-a\|--all] [service] [--json]` | print one service port or list reserved ports |
+| `gate run [-g\|--global] [-p name\|--project name] <service> -- <cmd...>` | run a child command with `PORT` injected |
+| `gate add [-g\|--global] [-p name\|--project name] <service> <domain> <port> [--json]` | add or update one reservation |
+| `gate rm [-g\|--global] [-p name\|--project name] <service> [--json]` | remove one reservation |
+| `gate clear [-g\|--global] [-p name\|--project name] [-y\|--yes] [--json]` | remove all reservations in one scope |
+| `gate prune [--json]` | remove stale project reservations whose config file is gone |
+| `gate daemon status [-a\|--all] [--json]` | inspect listener daemon status |
+| `gate daemon start` | start or reuse the default listener daemon |
+| `gate daemon stop [-a\|--all]` | stop listener daemon(s) |
+| `gate daemon restart` | restart the default listener daemon |
+| `gate daemon logs [-a\|--all]` | print listener daemon logs |
+| `gate trust` | install the local root CA into OS/browser trust stores |
+| `gate untrust` | remove the local root CA from trust stores |
+| `gate ca export [--out path]` | export the local root certificate |
+| `gate doctor [--fix] [--json]` | check and repair gate-owned local state |
+| `gate expose [--via local\|lan\|cloudflared\|tailscale] [--auth user:pass] [-g\|--global] [-p name\|--project name] <service> [--json]` | expose a scoped service through a provider |
+| `gate expose ls [--via provider] [-g\|--global] [-p name\|--project name] [-a\|--all] [--json]` | list exposure records |
+| `gate expose stop [--via provider] [--force] [-g\|--global] [-p name\|--project name] <service> [--json]` | stop or forget one exposure record |
+| `gate upgrade [-y\|--yes]` | upgrade to the latest release |
+| `gate completion bash\|zsh\|fish` | print shell completion script |
+| `gate skill path\|print` | locate or print the bundled agent skill |
+| `gate uninstall [--keep-trust] [--keep-brew] [-y\|--yes]` | remove gate state, binaries, and Homebrew package when applicable |
+
 ## Install
 
 ```bash
@@ -74,10 +108,22 @@ Create a starter config:
 gate init
 ```
 
+Use a specific project name:
+
+```bash
+gate init --name myapp
+```
+
 Non-interactive default:
 
 ```bash
 gate init -y
+```
+
+Overwrite an existing config after confirmation:
+
+```bash
+gate init --force
 ```
 
 Example `gate.toml`:
@@ -98,6 +144,13 @@ Bring the project up and start the daemon:
 
 ```bash
 gate up -d
+```
+
+Force the DNS mode when needed:
+
+```bash
+gate up --dns localhost
+gate up --dns hosts
 ```
 
 Run a dev server with its reserved port injected as `PORT`:
@@ -293,11 +346,12 @@ gate daemon status
 gate daemon logs
 ```
 
-Inspect or stop all known listener daemons:
+Inspect, stop, or read logs from all known listener daemons:
 
 ```bash
 gate daemon status --all
 gate daemon stop --all
+gate daemon logs --all
 ```
 
 `gate up -d` starts the listener daemon when needed and reloads the merged route
@@ -327,13 +381,18 @@ Examples:
 
 ```bash
 gate up --json
+gate down --json
 gate ls --json
 gate port -a --json
 gate daemon status --json
+gate doctor --json
 gate add web app.localhost 3000 --json
 gate rm web --json
 gate clear -y --json
 gate prune --json
+gate expose web --via local --json
+gate expose ls --json
+gate expose stop web --via cloudflared --json
 ```
 
 ## Access From Another Device
@@ -564,6 +623,13 @@ gate expose -g <name> --via <provider>
 gate expose -p <project> <service> --via <provider>
 ```
 
+Use the `local` provider when you want an exposure record and URL without
+starting an external tunnel:
+
+```bash
+gate expose web --via local
+```
+
 ## CA Export
 
 Export the root CA certificate for another device:
@@ -625,6 +691,20 @@ Installed completion offers:
 
 Completion stops offering gate arguments after `gate run <service> --`, because
 everything after `--` belongs to the child command.
+
+## Agent Skill
+
+Print the path to the bundled agent skill:
+
+```bash
+gate skill path
+```
+
+Print the bundled skill contents:
+
+```bash
+gate skill print
+```
 
 ## Uninstall
 
