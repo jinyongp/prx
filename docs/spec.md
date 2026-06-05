@@ -609,6 +609,11 @@ otherwise.
 Security rule: exposing a route is the only way non-loopback clients can pass
 the proxy's loopback guard.
 
+Exposure records persist only whether auth was enabled, not the `user:pass`
+secret. `gate expose ls` reports auth as `off`, `active`, or `missing`:
+`missing` means the persisted exposure expects auth but the running route table
+or current CLI session no longer has the secret.
+
 ---
 
 ## 14. Security Model

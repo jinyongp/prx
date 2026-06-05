@@ -71,6 +71,9 @@ fi
 `gate expose ls` status values are `live`, `down`, or `unverified`.
 `unverified` means gate has a local exposure record but cannot prove the
 external provider is currently serving it.
+The AUTH column values are `off`, `active`, or `missing`; `missing` means an
+auth-enabled exposure record remains but the session-scoped auth secret must be
+supplied again with `gate expose ... --auth user:pass`.
 
 ## Exit codes
 

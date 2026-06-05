@@ -619,6 +619,17 @@ Supported providers:
 `unverified`. `unverified` means gate has a local exposure record but cannot
 prove the external provider is currently serving it.
 
+The `AUTH` column reports whether a persisted exposure expects session-scoped
+basic auth to still be present in the running route table:
+
+| value | meaning |
+| --- | --- |
+| `off` | the exposure does not require basic auth |
+| `active` | auth is enabled and the daemon/session route still has the secret |
+| `missing` | the exposure was recorded with auth, but the in-memory secret is gone |
+
+If auth is `missing`, rerun `gate expose ... --auth user:pass` for that service.
+
 `gate expose` targets a scoped service/name:
 
 ```bash
