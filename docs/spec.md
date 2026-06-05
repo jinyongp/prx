@@ -5,6 +5,12 @@ single Go binary. It maps local domains to local dev servers, keeps domain and
 port reservations stable across projects, and can expose selected local routes
 to other devices for testing.
 
+This document is the product and implementation specification. It defines
+system boundaries, state models, security invariants, and architectural
+constraints. Exact command syntax, user examples, output fields, and exit codes
+belong in [`docs/usage.md`](usage.md); the bundled agent cheat sheet belongs in
+[`skills/gate/SKILL.md`](../skills/gate/SKILL.md).
+
 > [!NOTE]
 > `gate` is not a production proxy. It is designed for developer machines, local
 > services, and temporary test exposure.
@@ -123,18 +129,18 @@ It survives dev server restarts.
 
 ```mermaid
 stateDiagram-v2
-    [*] --> Reserved: gate up / gate add
+    [*] --> Reserved: reservation created
     Reserved --> Active: route loaded
-    Active --> Reserved: gate down
-    Reserved --> Removed: gate rm / gate clear
-    Reserved --> Removed: gate prune when owning gate.toml is gone
+    Active --> Reserved: route deactivated
+    Reserved --> Removed: reservation removed
+    Reserved --> Removed: owning config is gone
 ```
 
 ### Active Route
 
 An active route is a reservation currently loaded into the proxy. The `Active`
-flag controls whether it is included in the daemon route table. `gate down`
-deactivates scoped routes but preserves reservations.
+flag controls whether it is included in the daemon route table. Deactivation
+removes routes from the proxy while preserving reservations.
 
 ### Liveness
 
@@ -286,7 +292,7 @@ Rules:
 | `localhost` | Domains ending in `.localhost` | none | No file changes. Modern resolvers map `.localhost` to loopback. |
 | `hosts` | Custom local domains | sudo may be required | gate writes only its managed block in `/etc/hosts`. |
 
-Mode is selected from the domain or forced with `--dns localhost|hosts`.
+Mode is selected from the domain or explicitly forced by the caller.
 
 ```text
 # gate managed block
@@ -295,7 +301,8 @@ Mode is selected from the domain or forced with `--dns localhost|hosts`.
 ```
 
 Hosts-file editing is guarded by ownership and symlink checks. Permission
-failures return exit code `3`.
+failures must be classified separately from ordinary command failures so callers
+can decide whether to request elevated privileges.
 
 ---
 
@@ -316,15 +323,9 @@ flowchart TB
 ### Internal CA
 
 The default provider creates a local root CA and issues leaf certificates for
-local domains. Run `gate trust` once to install the root certificate into OS and
-browser trust stores. Run `gate untrust` to remove that root certificate from
-local trust stores without deleting local gate data.
-
-For another device, export the root certificate:
-
-```bash
-gate ca export --out gate-root.crt
-```
+local domains. The CLI provides trust, untrust, and root-certificate export
+operations so local and peer devices can trust gate-issued certificates when
+needed.
 
 Never copy or share the root private key.
 
@@ -378,7 +379,7 @@ over a listener Unix-domain socket.
 
 ```mermaid
 flowchart LR
-    cli["gate up -d"]
+    cli["route activation request"]
     store["update registry"]
     dns["ensure DNS"]
     listener["resolve listener<br/>default :443/:80"]
@@ -388,9 +389,9 @@ flowchart LR
     active["new route table active"]
 
     cli --> store --> dns --> listener --> start
-    start -->|"no and --daemon/-d"| launch --> push
+    start -->|"no and start requested"| launch --> push
     start -->|"yes"| push
-    start -->|"no and no -d"| note["print note: no daemon running"]
+    start -->|"no and start not requested"| dormant["routes remain persisted"]
     push --> active
 ```
 
@@ -402,180 +403,59 @@ Admin API:
 | `PUT` | `/routes` | Replace the active route table. |
 | `POST` | `/reload` | Reserved reload endpoint; currently reports reload success. |
 
-Only one daemon can own a given HTTPS/HTTP listen address pair. `gate up -d`
-starts or reuses that listener daemon, and replaces older scoped gate daemons
-that already own the same listener before starting the listener-keyed daemon.
+Only one daemon can own a given HTTPS/HTTP listen address pair. When daemon
+startup is requested, the CLI starts or reuses that listener daemon and replaces
+older scoped gate daemons that already own the same listener before starting the
+listener-keyed daemon.
 
 ---
 
-## 11. Command Surface
+## 11. Command Model
 
-| Command | Purpose | Data mode |
-| --- | --- | --- |
-| `gate init [--name name] [--force] [-y\|--yes]` | Scaffold a starter `gate.toml`. | text / json |
-| `gate up [-d\|--daemon] [--dns localhost\|hosts] [-g\|--global] [-p name\|--project name]` | Reserve current-project ports or activate existing scoped reservations, reflect DNS, reload routes, optionally start the listener daemon. | text / json |
-| `gate ls [--route active\|inactive] [--upstream live\|down] [-g\|--global] [-p name\|--project name] [-a\|--all]` | List scoped reservations with route and upstream status. | text / json |
-| `gate port [-g\|--global] [-p name\|--project name] [-a\|--all] [service]` | Print one scoped port or list reserved ports with route/upstream status. | text / json |
-| `gate run [-g\|--global] [-p name\|--project name] <service> -- <cmd>` | Run a child command with `PORT` injected from a scoped reservation. | child stdio |
-| `gate down [-g\|--global] [-p name\|--project name]` | Deactivate scoped routes and preserve reservations. | text / json |
-| `gate expose [--via <provider>] [--auth user:pass] [--no-auth] [-g\|--global] [-p name\|--project name] <service>` | Expose a scoped service/name through a provider. | text / json |
-| `gate expose ls [--via provider] [-g\|--global] [-p name\|--project name] [-a\|--all]` | List exposure records with provider status. | text / json |
-| `gate expose stop [--via <provider>] [--force] [-g\|--global] [-p name\|--project name] <service>` | Stop one exposure and remove its record after provider teardown. | text / json |
-| `gate daemon status [-a\|--all]` | Print listener daemon status. | text / json |
-| `gate daemon start` | Start or reuse the default listener daemon. | text |
-| `gate daemon stop [-a\|--all]` | Stop listener daemon(s). | text |
-| `gate daemon restart` | Restart the default listener daemon. | text |
-| `gate daemon logs [-a\|--all]` | Print listener daemon logs. | text |
-| `gate add [-g\|--global] [-p name\|--project name] <service> <domain> <port>` | Add a scoped service/name reservation. | text / json |
-| `gate rm [-g\|--global] [-p name\|--project name] <service>` | Remove one scoped service/name reservation. | text / json |
-| `gate clear [-g\|--global] [-p name\|--project name] [-y\|--yes]` | Remove all reservations in one scope. | text / json |
-| `gate prune` | Remove reservations whose owning config no longer exists. | text / json |
-| `gate trust` | Install the local root CA into trust stores. | text |
-| `gate untrust` | Remove the local root CA from trust stores. | text |
-| `gate ca export [--out path]` | Export the local root certificate. | text |
-| `gate doctor [--fix] [--json]` | Check and repair local gate-owned state. | text / json |
-| `gate upgrade [-y\|--yes]` | Upgrade to the latest release, using Homebrew when the running binary is Homebrew-managed, then run `doctor` as a non-blocking post-check. | text |
-| `gate completion bash\|zsh\|fish` | Print shell completion. | script |
-| `gate skill path\|print` | Locate or print the bundled agent skill. | text |
-| `gate uninstall [--keep-trust] [--keep-brew] [-y\|--yes]` | Remove gate state, binaries, and Homebrew package when applicable. | text |
+The public CLI is organized around a small set of responsibilities:
 
-Scope flags are mutually exclusive. Without a scope flag, registry commands use
-the current project when a `gate.toml` is discoverable; otherwise they use the
-global scope. `gate rm <service>` edits the current project's `gate.toml` when
-the default current-project scope is selected. `gate clear` removes registry,
-route, and DNS state only; it does not edit project config files.
-
-### Shell Completion
-
-`gate completion bash|zsh|fish` prints shell completion scripts. Completion is
-read-only: it may read the registry, current project config, and known project
-config paths, but it must not start daemons, modify DNS, trust certificates, or
-write files. Missing or invalid local state yields no candidates rather than
-shell-visible errors. Candidates use a stable task-oriented order.
-
-Completion mirrors the command surface:
-
-- root commands come from public command specs; hidden/internal commands are not
-  advertised
-- `daemon` completes `status`, `start`, `stop`, `restart`, and `logs`
-- `ca` completes `export`; `expose` completes `ls` and `stop`;
-  `skill` completes `path` and `print`
-- `completion` completes `bash`, `zsh`, and `fish`
-- `--<tab>` completes long flags for the current command/subcommand; `-<tab>`
-  completes short flags; `-h|--help` are common help candidates
-
-Dynamic candidates:
-
-- `--project` completes project names from the local registry
-- scoped service/name positionals complete current-project services by default
-  inside a project, global reservation names outside a project, global names
-  with `-g|--global`, and known services for a named project with
-  `-p|--project`
-- named-project service completion includes registry services and services from
-  a known local `gate.toml` config path
-
-Static flag-value candidates:
-
-- `ls --route`: `active`, `inactive`
-- `ls --upstream`: `live`, `down`
-- `up --dns`: `localhost`, `hosts`
-- `expose --via`: `local`, `lan`, `cloudflared`, `tailscale`
-
-File completion is disabled for registry service/name positionals so local file
-names are not mixed with registry candidates. `ca export --out` keeps normal
-file path completion. `gate run <service> --` stops completing gate arguments
-after `--`; the rest belongs to the child command.
-
-Registry removal selects reservations by service/name in the chosen scope.
-
-`gate clear` is the only project-wide/global-wide registry delete command. In
-TTY text mode it prompts when `-y` is omitted and accepts only `y` or `yes`.
-In non-interactive and JSON contexts it refuses to run unless `-y` is present.
-Single-service `gate rm` operations do not prompt.
-
-Removal text output keeps scope and service readable without synthetic global
-owner strings:
-
-```text
-removed smoke/web
-removed web
-removed project smoke (2 reservations)
-removed global reservations (2 reservations)
-```
-
-Removal JSON output includes explicit scope fields:
-
-```json
-{"scope":"project","project":"smoke","service":"web","removed":true}
-{"scope":"global","service":"web","removed":true}
-{"scope":"project","project":"smoke","removed":true,"reservations":2}
-{"scope":"global","removed":true,"reservations":2}
-```
-
-Tabular registry output uses separate `SCOPE` and `SERVICE` columns; global
-reservations are not displayed as slash-combined owners.
-
-Exit codes:
-
-| Code | Meaning |
+| Area | Responsibility |
 | --- | --- |
-| `0` | success |
-| `1` | general error |
-| `2` | usage error |
-| `3` | permission required |
-| `4` | port, domain, or daemon-listen conflict |
+| Project setup | Create and edit project-local routing configuration. |
+| Route lifecycle | Reserve ports, activate/deactivate routes, reload listener daemons, and inject `PORT` into child commands. |
+| Registry inspection | Inspect scoped reservations, route activation, upstream liveness, and assigned ports. |
+| Exposure lifecycle | Create, inspect, and stop temporary exposure records through supported providers. |
+| Daemon lifecycle | Start, stop, restart, inspect, and read logs for listener-keyed daemons. |
+| Trust and CA | Install, remove, and export the local root CA. |
+| Maintenance | Diagnose, repair, prune, upgrade, uninstall, and generate shell completion. |
+
+Exact command syntax, examples, exit codes, and output-field meanings are
+documented in [`docs/usage.md`](usage.md). This spec only constrains behavior
+that affects the product model or implementation invariants.
+
+Scope selectors are mutually exclusive. Without an explicit scope, commands use
+the current project when a `gate.toml` is discoverable; otherwise they use the
+global scope. Commands that remove one reservation operate on a selected
+service/name; commands that clear an entire scope require an explicit
+non-interactive confirmation path.
+
+Shell completion is read-only. It may inspect local registry and project config
+state, but it must not start daemons, modify DNS, trust certificates, or write
+files. Missing or invalid local state should produce no candidates rather than
+shell-visible errors.
 
 ---
 
-## 12. Output Contract
+## 12. Output Principles
 
-```mermaid
-flowchart TD
-    cmd["command result"]
-    json{"--json?"}
-    tty{"stdout is TTY or colour forced?<br/>and not colour disabled?"}
-    data["stdout: single json object/array"]
-    rich["stdout: styled text output"]
-    plain["stdout: plain text output"]
-    diag["stderr: diagnostics, warnings, logs"]
-
-    cmd --> json
-    json -->|"yes"| data
-    json -->|"no"| tty
-    tty -->|"yes"| rich
-    tty -->|"no"| plain
-    cmd --> diag
-```
-
-Rules:
+Automation compatibility is a product invariant:
 
 - Program data goes to stdout.
 - Diagnostics, warnings, progress, and logs go to stderr.
-- `--json` emits one JSON value and no extra text on stdout.
-- JSON-mode errors are written to stderr as a JSON error envelope.
-- `gate doctor --json` is a check/report command: discovered issues are report
-  data and are written to stdout even when the command exits non-zero. Usage and
-  internal errors still use the JSON error envelope on stderr.
-- Rich output is enabled when stdout is a terminal and colour is not disabled.
-  `FORCE_COLOR=1` or `CLICOLOR_FORCE=1` forces rich output for non-TTY
-  writers. `NO_COLOR` always disables rich output. `CLICOLOR=0` disables default
-  TTY colour unless a force variable is set.
-- Piped output stays plain and grep-friendly by default.
-- Long-running command progress may show a single-line activity indicator on
-  stderr only when stderr is an interactive terminal. Activity indicators are
-  disabled for JSON mode, redirected stderr, `NO_COLOR`, `CI`, and
-  `GATE_NO_INDICATOR`. `FORCE_COLOR` and `CLICOLOR_FORCE` do not force activity
-  indicators.
-- Activity indicators must stop before final output, errors, warnings,
-  interactive prompts, or child-process stdout/stderr ownership. Successful
-  phases may leave one completed line before later output; failed, cancelled, or
-  handoff phases clear their line.
+- Machine-readable output must not be decorated with terminal styling or
+  progress indicators.
+- Terminal presentation may improve human readability, but it must not change
+  non-TTY or machine-readable behavior.
+- Long-running progress indicators must not interfere with final output,
+  errors, prompts, or child-process stdio ownership.
 
-The current presentation layer uses `lipgloss` for terminal/forced-colour
-styling and borderless tables, plus `internal/ui` activity indicators for
-selected long-running command phases. There is no fullscreen TUI command in the
-current public surface. Any future interactive TUI must keep the same output
-contract and must not affect non-TTY or JSON behavior.
+Detailed JSON behavior, text examples, environment-variable controls, and exit
+codes are usage-document responsibilities.
 
 ---
 
@@ -599,20 +479,19 @@ flowchart LR
 | --- | --- | --- | --- |
 | `local` | Same machine | active route | No external exposure. |
 | `lan` | Same network | `.local` domain, reachable machine, trusted CA on clients | gate validates and marks the route exposed; it does not configure other devices' DNS. |
-| `cloudflared` | Public temporary URL | `cloudflared` in `PATH` | Requires `--auth user:pass` or explicit `--no-auth`; quick tunnel URL is temporary. |
+| `cloudflared` | Public temporary URL | `cloudflared` in `PATH` | Requires authenticated exposure or an explicit unauthenticated opt-out; quick tunnel URL is temporary. |
 | `tailscale` | Tailnet | logged-in `tailscale` in `PATH` | Uses Tailscale Serve; detailed teardown is handled with Tailscale commands. |
 
-`gate expose` targets one scoped active route. Without a scope flag it resolves
-the current project when inside a `gate.toml` tree and global reservations
-otherwise.
+Exposure activation targets one scoped active route. Without an explicit scope,
+it resolves the current project when inside a `gate.toml` tree and global
+reservations otherwise.
 
 Security rule: exposing a route is the only way non-loopback clients can pass
 the proxy's loopback guard.
 
-Exposure records persist only whether auth was enabled, not the `user:pass`
-secret. `gate expose ls` reports auth as `off`, `active`, or `missing`:
-`missing` means the persisted exposure expects auth but the running route table
-or current CLI session no longer has the secret.
+Exposure records persist whether auth was enabled, but never persist the
+`user:pass` secret. Auth secrets are session-scoped and must be supplied again
+when a provider route needs to be reloaded after the secret is gone.
 
 ---
 
@@ -695,7 +574,7 @@ flowchart TB
 | Package | Responsibility |
 | --- | --- |
 | `cmd/gate` | Entrypoint, cobra root command, subcommand dispatch, top-level usage. |
-| `internal/cli` | Command parsing, command orchestration, text/json output, exit codes. |
+| `internal/cli` | Command parsing, orchestration, output routing, and error classification. |
 | `internal/ui` | Styling helpers and activity indicators. Presentation tier only. |
 | `internal/paths` | XDG/macOS config, data, state, and runtime path resolution. |
 | `internal/config` | `gate.toml` discovery, parsing, validation, env interpolation, surgical editing. |
@@ -761,5 +640,5 @@ scope is intentionally smaller and is now part of this spec:
 | Charts/metrics TUI | Not part of the current command surface. |
 
 If fullscreen or interactive TUI features are added later, they must be specified
-in this file before implementation and must preserve the output contract in
+in this file before implementation and must preserve the output principles in
 section 12.

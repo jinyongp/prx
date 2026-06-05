@@ -21,10 +21,16 @@ Use `just` recipes instead of raw `go` when a recipe exists.
 For ordinary changes, run the narrowest relevant check first, then `just check`
 when the change is ready.
 
-## Source of truth
+## Documentation boundaries
 
-Use [`docs/spec.md`](docs/spec.md) for architecture, implementation constraints,
-platform support, command behavior, output contracts, and exit codes.
+Use [`docs/spec.md`](docs/spec.md) for product boundaries, architecture, state
+models, security invariants, and implementation constraints. Keep it focused on
+what the system must do and why; avoid duplicating command examples, exact
+output fields, or CLI reference details there.
 
-Use [`skills/gate/SKILL.md`](skills/gate/SKILL.md) for gate usage docs. Do not
-duplicate end-user command examples or JSON schema details here.
+Use [`docs/usage.md`](docs/usage.md) for end-user command syntax, examples,
+output semantics, JSON behavior, troubleshooting, and exit codes.
+
+Use [`skills/gate/SKILL.md`](skills/gate/SKILL.md) for the concise operational
+reference agents need when using gate as a tool. Do not duplicate end-user
+examples or JSON schema details here.
