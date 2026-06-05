@@ -29,6 +29,8 @@ type ActivityOptions struct {
 
 type Activity struct {
 	w        io.Writer
+	label    string
+	doneMark string
 	stopc    chan struct{}
 	donec    chan struct{}
 	stopOnce sync.Once
@@ -51,7 +53,7 @@ func ActivityEnabled(w io.Writer, jsonOut bool) bool {
 }
 
 func StartActivity(w io.Writer, label string, opts ActivityOptions) *Activity {
-	a := &Activity{w: w}
+	a := &Activity{w: w, label: label}
 	if !opts.Enabled || w == nil {
 		return a
 	}
@@ -70,6 +72,7 @@ func StartActivity(w io.Writer, label string, opts ActivityOptions) *Activity {
 	}
 
 	a.enabled = true
+	a.doneMark = activityDoneMarker(opts.Renderer)
 	a.stopc = make(chan struct{})
 	a.donec = make(chan struct{})
 	go a.run(label, frames, delay, interval)
@@ -77,6 +80,14 @@ func StartActivity(w io.Writer, label string, opts ActivityOptions) *Activity {
 }
 
 func (a *Activity) Stop() {
+	a.finish(false)
+}
+
+func (a *Activity) Complete() {
+	a.finish(true)
+}
+
+func (a *Activity) finish(complete bool) {
 	if a == nil || !a.enabled {
 		return
 	}
@@ -86,7 +97,11 @@ func (a *Activity) Stop() {
 		a.mu.Lock()
 		defer a.mu.Unlock()
 		if a.wrote {
-			_, _ = io.WriteString(a.w, "\r\033[K")
+			if complete {
+				_, _ = io.WriteString(a.w, "\r\033[K"+a.doneMark+" "+a.label+"\n")
+			} else {
+				_, _ = io.WriteString(a.w, "\r\033[K")
+			}
 		}
 	})
 }
@@ -135,6 +150,18 @@ func activityFrames(renderer ActivityRenderer) []string {
 		return nil
 	default:
 		return nil
+	}
+}
+
+func activityDoneMarker(renderer ActivityRenderer) string {
+	switch renderer {
+	case ActivityASCII:
+		return "ok"
+	default:
+		if activityBrailleSupported() {
+			return Tint(Success, "✓")
+		}
+		return "ok"
 	}
 }
 

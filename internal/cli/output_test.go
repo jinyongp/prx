@@ -72,6 +72,10 @@ func (a recordingActivity) Stop() {
 	*a.events = append(*a.events, "stop:"+a.label)
 }
 
+func (a recordingActivity) Complete() {
+	*a.events = append(*a.events, "complete:"+a.label)
+}
+
 func recordActivities(t *testing.T) *[]string {
 	t.Helper()
 	oldStart := startActivityFunc

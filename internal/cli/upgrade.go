@@ -66,9 +66,11 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 
 	activity := startActivity(stderr, false, "checking latest release")
 	latestTag, err := latestReleaseTag(ctx)
-	activity.Stop()
 	if err != nil {
+		activity.Stop()
 		printUpgradeWarning(stderr, "unable to check latest version: "+err.Error())
+	} else {
+		activity.Complete()
 	}
 
 	if latestTag != "" {
@@ -163,10 +165,11 @@ func runUpgradeCommand(stderr io.Writer, label, action string, cmd *exec.Cmd) er
 	cmd.Stderr = &output
 	activity := startActivity(stderr, false, label)
 	err := cmd.Run()
-	activity.Stop()
 	if err != nil {
+		activity.Stop()
 		return upgradeCommandError(action, err, output.String())
 	}
+	activity.Complete()
 	return nil
 }
 
@@ -180,7 +183,14 @@ func upgradeCommandError(action string, err error, output string) error {
 
 func prepareUpgradeScript(ctx context.Context, stderr io.Writer) (string, error) {
 	activity := startActivity(stderr, false, "downloading installer")
-	defer activity.Stop()
+	completed := false
+	defer func() {
+		if completed {
+			activity.Complete()
+		} else {
+			activity.Stop()
+		}
+	}()
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, upgradeScriptURL, nil)
 	if err != nil {
@@ -222,6 +232,7 @@ func prepareUpgradeScript(ctx context.Context, stderr io.Writer) (string, error)
 		return "", err
 	}
 	cleanup = false
+	completed = true
 	return scriptPath, nil
 }
 
@@ -295,8 +306,8 @@ func restartDaemonAfterUpgrade(st daemon.Status, stdout, stderr io.Writer) int {
 		activity.Stop()
 		return fail(stderr, false, ExitError, "upgrade", "failed to reload daemon routes: "+err.Error())
 	}
-	activity.Stop()
-	printSuccess(stdout, fmt.Sprintf("daemon restarted · pid %d · https %s · http %s", result.PID, httpsAddr, httpAddr))
+	activity.Complete()
+	printDaemonRunResult(stdout, "daemon restarted", result.PID, httpsAddr, httpAddr)
 	return ExitOK
 }
 

@@ -746,7 +746,11 @@ func reloadListenerRoutes(refs []listenerDaemonRef, stderr io.Writer, jsonOut bo
 func setListenerRoutesWithActivity(ref listenerDaemonRef, stderr io.Writer, jsonOut bool, label string) error {
 	activity := startActivity(stderr, jsonOut, label)
 	err := setListenerRoutesForRef(ref)
-	activity.Stop()
+	if err != nil {
+		activity.Stop()
+	} else {
+		activity.Complete()
+	}
 	return err
 }
 
@@ -803,7 +807,11 @@ func runDomainDNS(provider dns.Provider, domain string, stderr io.Writer, jsonOu
 	}
 	activity := startActivity(stderr, jsonOut, label)
 	err := fn(domain)
-	activity.Stop()
+	if err != nil {
+		activity.Stop()
+	} else {
+		activity.Complete()
+	}
 	return err
 }
 

@@ -37,6 +37,7 @@ func richOut(w io.Writer, jsonOut bool) bool { return !jsonOut && ui.ColorEnable
 
 type activityHandle interface {
 	Stop()
+	Complete()
 }
 
 var startActivityFunc = func(stderr io.Writer, jsonOut bool, label string) activityHandle {

@@ -375,6 +375,9 @@ func TestRestartDaemonAfterUpgradeReloadsListenerRoutes(t *testing.T) {
 	if code := restartDaemonAfterUpgrade(st, &out, &errb); code != ExitOK {
 		t.Fatalf("restartDaemonAfterUpgrade exit = %d, stderr=%s", code, errb.String())
 	}
+	if got := out.String(); strings.Contains(got, " · ") || !strings.Contains(got, "daemon restarted") || !strings.Contains(got, "https") || !strings.Contains(got, "http") {
+		t.Fatalf("restart output should use daemon result fields, got:\n%s", got)
+	}
 	if reloadedRef.fileKey() != ref.fileKey() {
 		t.Fatalf("reload ref = %+v, want %+v", reloadedRef, ref)
 	}
@@ -411,7 +414,7 @@ func TestPrepareUpgradeScriptStopsActivityBeforeInstallerHandoff(t *testing.T) {
 		t.Fatalf("prepareUpgradeScript: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Remove(path) })
-	if got := lastEvent(*events); got != "stop:downloading installer" {
+	if got := lastEvent(*events); got != "complete:downloading installer" {
 		t.Fatalf("installer handoff happened before activity stopped; events=%v", *events)
 	}
 	info, err := os.Stat(path)

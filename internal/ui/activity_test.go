@@ -101,6 +101,26 @@ func TestStartActivityWritesAndClearsLine(t *testing.T) {
 	}
 }
 
+func TestStartActivityCompleteKeepsDoneLine(t *testing.T) {
+	var buf lockedBuffer
+	a := StartActivity(&buf, "work", ActivityOptions{
+		Enabled:  true,
+		Delay:    time.Nanosecond,
+		Interval: time.Millisecond,
+		Renderer: ActivityASCII,
+	})
+	deadline := time.Now().Add(200 * time.Millisecond)
+	for time.Now().Before(deadline) && !strings.Contains(buf.String(), "work") {
+		time.Sleep(time.Millisecond)
+	}
+	a.Complete()
+	a.Complete()
+	got := buf.String()
+	if !strings.Contains(got, "\r\033[Kok work\n") {
+		t.Fatalf("activity did not leave completion line: %q", got)
+	}
+}
+
 func TestActivityFrameSelection(t *testing.T) {
 	resetActivityHooks(t)
 	activityGetenv = func(key string) string {

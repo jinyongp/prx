@@ -51,7 +51,7 @@ func Doctor(args []string, stdout, stderr io.Writer) int {
 	}
 	report := doctorReport{Issues: runDoctorChecks(*fix)}
 	if activity != nil {
-		activity.Stop()
+		activity.Complete()
 	}
 	report.OK = doctorReportOK(report)
 	if *jsonOut {

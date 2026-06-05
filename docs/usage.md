@@ -313,6 +313,9 @@ error envelope.
 Some longer operations show a one-line activity indicator on stderr when stderr
 is an interactive terminal. Indicators never appear in JSON mode or when stderr
 is redirected. `NO_COLOR`, `CI`, and `GATE_NO_INDICATOR=1` disable them.
+When an activity phase completes after it was displayed, gate keeps a completed
+line so later output still shows which long-running steps finished. Failed,
+cancelled, or prompt-handoff phases clear the active line instead.
 
 Text styling is enabled for terminals by default. `NO_COLOR=1` disables styling,
 `FORCE_COLOR=1` or `CLICOLOR_FORCE=1` forces styling for non-TTY output, and

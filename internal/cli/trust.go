@@ -39,10 +39,11 @@ func Trust(args []string, stdout, stderr io.Writer) int {
 	}
 	activity := startActivity(stderr, false, "preparing trust store")
 	authority, err := ca.Load(paths.DataDir())
-	activity.Stop()
 	if err != nil {
+		activity.Stop()
 		return fail(stderr, false, ExitError, "ca", err.Error())
 	}
+	activity.Complete()
 	if err := trustAuthorityFunc(authority); err != nil {
 		if os.IsPermission(err) {
 			return fail(stderr, false, ExitPerm, "permission", err.Error())
@@ -62,14 +63,16 @@ func Untrust(args []string, stdout, stderr io.Writer) int {
 	}
 	activity := startActivity(stderr, false, "preparing trust store")
 	authority, err := ca.LoadCertificate(paths.DataDir())
-	activity.Stop()
 	if errors.Is(err, ca.ErrNotFound) {
+		activity.Stop()
 		printInfo(stdout, "root CA not found; nothing to untrust")
 		return ExitOK
 	}
 	if err != nil {
+		activity.Stop()
 		return fail(stderr, false, ExitError, "ca", err.Error())
 	}
+	activity.Complete()
 	if err := untrustAuthorityFunc(authority); err != nil {
 		if os.IsPermission(err) {
 			return fail(stderr, false, ExitPerm, "permission", err.Error())
@@ -157,7 +160,11 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 	}
 	result, err := provider.Expose(context.Background(), res.Domain, expose.Opts{Auth: *auth})
 	if activity != nil {
-		activity.Stop()
+		if err != nil {
+			activity.Stop()
+		} else {
+			activity.Complete()
+		}
 	}
 	if err != nil {
 		return fail(stderr, *jsonOut, ExitError, "expose_failed", err.Error())
@@ -203,14 +210,15 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 		}
 		activity := startActivity(stderr, *jsonOut, "reloading routes")
 		serr := setListenerRoutesFunc(ref, routes)
-		activity.Stop()
 		if serr != nil {
+			activity.Stop()
 			cleanupExposureProvider(provider, record)
 			if rollbackErr := removeExposureRecordFromStore(record); rollbackErr != nil {
 				return fail(stderr, *jsonOut, ExitError, "rollback_failed", "expose failed and rollback failed: "+rollbackErr.Error())
 			}
 			return fail(stderr, *jsonOut, ExitError, "reload_failed", serr.Error())
 		}
+		activity.Complete()
 	}
 
 	if *jsonOut {
@@ -459,10 +467,11 @@ func reloadExposureRecordsWith(records []expose.Record, stderr io.Writer, jsonOu
 		applyExposureRecordSet(ref.String(), routes, records)
 		activity := startActivity(stderr, jsonOut, "reloading routes")
 		err := setListenerRoutesFunc(ref, routes)
-		activity.Stop()
 		if err != nil {
+			activity.Stop()
 			return err
 		}
+		activity.Complete()
 	}
 	return nil
 }

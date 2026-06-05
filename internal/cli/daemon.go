@@ -206,8 +206,8 @@ func daemonStart(args []string, stdout, stderr io.Writer) int {
 	}
 	activity := startActivity(stderr, false, "starting daemon")
 	result := startDaemonCommand(newDaemonServeCommand(executablePath(), ref.socketPath(), pair.HTTPSAddr, pair.HTTPAddr), client, ref)
-	activity.Stop()
 	if result.Code == ExitOK {
+		activity.Complete()
 		if err := setListenerRoutesWithActivity(ref, stderr, false, "reloading routes"); err != nil {
 			cleanupStartedDaemon(client, ref, result.PID)
 			return fail(stderr, false, ExitError, "reload_failed", err.Error())
@@ -220,6 +220,7 @@ func daemonStart(args []string, stdout, stderr io.Writer) int {
 		printDaemonRunResult(stdout, "daemon started", result.PID, displayListenAddr(st.HTTPSAddr), displayListenAddr(st.HTTPAddr))
 		return ExitOK
 	}
+	activity.Stop()
 	return fail(stderr, false, result.Code, "start", result.Message)
 }
 
@@ -255,10 +256,11 @@ func daemonRestart(args []string, stdout, stderr io.Writer) int {
 	}
 
 	result := startDaemonCommand(newDaemonServeCommand(executablePath(), ref.socketPath(), pair.HTTPSAddr, pair.HTTPAddr), client, ref)
-	activity.Stop()
 	if result.Code != ExitOK {
+		activity.Stop()
 		return fail(stderr, false, result.Code, "restart", result.Message)
 	}
+	activity.Complete()
 	if err := setListenerRoutesWithActivity(ref, stderr, false, "reloading routes"); err != nil {
 		cleanupStartedDaemon(client, ref, result.PID)
 		return fail(stderr, false, ExitError, "reload_failed", err.Error())

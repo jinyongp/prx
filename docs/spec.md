@@ -586,9 +586,10 @@ Rules:
   disabled for JSON mode, redirected stderr, `NO_COLOR`, `CI`, and
   `GATE_NO_INDICATOR`. `FORCE_COLOR` and `CLICOLOR_FORCE` do not force activity
   indicators.
-- Activity indicators must stop and clear their line before final success
-  output, errors, warnings, interactive prompts, or child-process stdout/stderr
-  ownership.
+- Activity indicators must stop before final output, errors, warnings,
+  interactive prompts, or child-process stdout/stderr ownership. Successful
+  phases may leave one completed line before later output; failed, cancelled, or
+  handoff phases clear their line.
 
 The current presentation layer uses `lipgloss` for terminal/forced-colour
 styling and borderless tables, plus `internal/ui` activity indicators for

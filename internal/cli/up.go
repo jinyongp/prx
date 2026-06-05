@@ -270,10 +270,11 @@ func reloadUpRoutes(ref listenerDaemonRef, routes []proxy.Route, startDaemon boo
 			}
 			activity := startActivity(stderr, jsonOut, "starting daemon")
 			result := startDaemonCommand(newDaemonServeCommand(executablePath(), ref.socketPath(), pair.HTTPSAddr, pair.HTTPAddr), client, ref)
-			activity.Stop()
 			if result.Code != ExitOK {
+				activity.Stop()
 				return false, "", fail(stderr, jsonOut, result.Code, "daemon_start", result.Message)
 			}
+			activity.Complete()
 			startedPID = result.PID
 		}
 	}
