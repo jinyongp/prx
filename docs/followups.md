@@ -50,16 +50,13 @@ Suggested work:
 
 ## Implementation
 
-### ACME Implementation Boundary
+### Public TLS Scope Guard
 
-Problem: public docs no longer expose ACME as a supported configuration option,
-but ACME-related implementation files still exist under `internal/tlsprov`.
+Current guard: public TLS behavior is limited to gate's internal local CA.
+Unsupported public TLS provider config fields fail validation instead of being
+treated as supported options.
 
 Suggested work:
 
-- Decide whether ACME should be removed, kept as dormant experimental code, or
-  moved behind an explicitly private future-work boundary.
-- If retained, document the internal-only status in developer docs without
-  presenting it as a public feature.
-- Add a public-docs check that rejects `acme`, `acme_dns`, and `tlsprov`
-  references outside intentional developer/internal contexts.
+- Add a public-docs check that rejects unsupported public TLS provider wording
+  outside intentional developer/internal contexts.

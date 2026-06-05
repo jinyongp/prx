@@ -18,7 +18,7 @@ func ConfigDir() string {
 	return base("XDG_CONFIG_HOME", ".config")
 }
 
-// DataDir returns the directory for the CA, certificates and ACME state
+// DataDir returns the directory for the CA and certificates
 // (default ~/.local/share/gate).
 func DataDir() string {
 	return base("XDG_DATA_HOME", filepath.Join(".local", "share"))

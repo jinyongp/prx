@@ -4,6 +4,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -140,6 +141,47 @@ tls = "bogus"
 			writeFile(t, path, body)
 			if _, err := Load(path); err == nil {
 				t.Fatal("expected error, got nil")
+			}
+		})
+	}
+}
+
+func TestLoadRejectsUnsupportedTLSConfig(t *testing.T) {
+	cases := map[string]struct {
+		config string
+		want   string
+	}{
+		"tls acme": {
+			config: `
+[project]
+name = "demo"
+
+[services.web]
+domain = "app.example.com"
+tls = "acme"
+`,
+			want: "tls acme is not supported",
+		},
+		"acme dns": {
+			config: `
+[project]
+name = "demo"
+
+[services.web]
+domain = "app.example.com"
+acme_dns = ""
+`,
+			want: "acme_dns is not supported",
+		},
+	}
+	for name, tc := range cases {
+		t.Run(name, func(t *testing.T) {
+			dir := t.TempDir()
+			path := filepath.Join(dir, Filename)
+			writeFile(t, path, tc.config)
+			_, err := Load(path)
+			if err == nil || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("Load err = %v, want %q", err, tc.want)
 			}
 		})
 	}

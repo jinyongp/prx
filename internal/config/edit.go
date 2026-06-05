@@ -158,9 +158,6 @@ func upsertServiceBlock(block []string, svc Service) []string {
 	if svc.TLS != "" && svc.TLS != TLSInternal {
 		out = upsertTomlScalar(out, "tls", fmt.Sprintf("%q", svc.TLS))
 	}
-	if svc.ACMEDNS != "" {
-		out = upsertTomlScalar(out, "acme_dns", fmt.Sprintf("%q", svc.ACMEDNS))
-	}
 	return out
 }
 
@@ -190,9 +187,6 @@ func renderBlock(name string, svc Service) string {
 	}
 	if svc.TLS != "" && svc.TLS != TLSInternal {
 		fmt.Fprintf(&sb, "tls = %q\n", svc.TLS)
-	}
-	if svc.ACMEDNS != "" {
-		fmt.Fprintf(&sb, "acme_dns = %q\n", svc.ACMEDNS)
 	}
 	return strings.TrimRight(sb.String(), "\n")
 }

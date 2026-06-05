@@ -30,10 +30,9 @@ var ErrNotFound = errors.New("gate.toml not found")
 
 // Service is a single domain → port mapping within a project.
 type Service struct {
-	Domain  string `toml:"domain"`
-	Port    int    `toml:"port,omitempty"` // 0 = auto-allocate
-	TLS     string `toml:"tls,omitempty"`  // internal only; omitted defaults to internal
-	ACMEDNS string `toml:"acme_dns,omitempty"`
+	Domain string `toml:"domain"`
+	Port   int    `toml:"port,omitempty"` // 0 = auto-allocate
+	TLS    string `toml:"tls,omitempty"`  // internal only; omitted defaults to internal
 }
 
 // Project is the decoded gate.toml.
@@ -53,10 +52,10 @@ type file struct {
 }
 
 type rawService struct {
-	Domain  string `toml:"domain"`
-	Port    any    `toml:"port,omitempty"`
-	TLS     string `toml:"tls,omitempty"`
-	ACMEDNS string `toml:"acme_dns,omitempty"`
+	Domain             string  `toml:"domain"`
+	Port               any     `toml:"port,omitempty"`
+	TLS                string  `toml:"tls,omitempty"`
+	UnsupportedACMEDNS *string `toml:"acme_dns,omitempty"`
 }
 
 var envKeyRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
@@ -92,11 +91,13 @@ func parse(path string, b []byte) (*Project, error) {
 		if err != nil {
 			return nil, err
 		}
+		if raw.UnsupportedACMEDNS != nil {
+			return nil, fmt.Errorf("service %q: acme_dns is not supported", name)
+		}
 		svc := Service{
-			Domain:  domain,
-			Port:    port,
-			TLS:     raw.TLS,
-			ACMEDNS: raw.ACMEDNS,
+			Domain: domain,
+			Port:   port,
+			TLS:    raw.TLS,
 		}
 		if svc.TLS == "" {
 			svc.TLS = TLSInternal
@@ -326,10 +327,9 @@ func (p *Project) Validate() error {
 		if err := ValidateDomain(svc.Domain); err != nil {
 			return fmt.Errorf("service %q: %w", name, err)
 		}
-		if svc.ACMEDNS != "" {
-			return fmt.Errorf("service %q: acme_dns is not supported", name)
-		}
 		switch svc.TLS {
+		case "acme":
+			return fmt.Errorf("service %q: tls acme is not supported", name)
 		case TLSInternal:
 		default:
 			return fmt.Errorf("service %q: invalid tls %q", name, svc.TLS)
