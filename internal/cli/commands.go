@@ -953,9 +953,11 @@ func Prune(args []string, stdout, stderr io.Writer) int {
 
 // Run executes `gate run <service> -- <cmd...>` with PORT injected.
 func Run(args []string, stdout, stderr io.Writer) int {
+	fs := flag.NewFlagSet("run", flag.ContinueOnError)
+	scopeFlags := defineDaemonScopeFlags(fs, false)
 	if len(args) > 0 && (args[0] == "-h" || args[0] == "--help") {
 		sp := specFor("run")
-		WriteHelp(stdout, "run", sp.Args, sp.Summary, nil)
+		WriteHelp(stdout, "run", sp.Args, sp.Summary, collectFlags(fs))
 		return ExitOK
 	}
 
@@ -964,8 +966,6 @@ func Run(args []string, stdout, stderr io.Writer) int {
 		usageLine(stderr, "run")
 		return ExitUsage
 	}
-	fs := flag.NewFlagSet("run", flag.ContinueOnError)
-	scopeFlags := defineDaemonScopeFlags(fs, false)
 	if handled, code := parseFlags(fs, "run", args[:sep], stdout, stderr); handled {
 		return code
 	}

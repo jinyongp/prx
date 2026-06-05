@@ -39,4 +39,6 @@ check_absent 'docs/spec.md must not document JSON-mode error details; put output
 check_absent 'docs/spec.md must not contain text output examples; put output examples in docs/usage.md.' '^removed '
 check_absent 'docs/spec.md must not contain JSON output examples; put output examples in docs/usage.md.' '^\{"scope":'
 
+go test ./cmd/gate -run TestUsageQuickReferenceMatchesPublicHelp -count=1
+
 exit "$failed"

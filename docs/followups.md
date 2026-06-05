@@ -33,14 +33,18 @@ Suggested work:
 
 ### Command Reference Drift
 
-Problem: `docs/usage.md`, shell completion specs, and command help can drift as
-flags and subcommands change.
+Current guard: `just docs-check` verifies the `docs/usage.md` Quick Reference
+command rows and public flags against rendered CLI help.
+
+Remaining problem: longer usage examples, completion-specific documentation,
+and command help can still drift as command behavior changes.
 
 Suggested work:
 
-- Generate or lint the quick reference against the command/completion specs.
-- Add a narrow docs check that fails when public flags exist in code but are
-  missing from `docs/usage.md`.
+- Decide whether longer command examples should stay manually reviewed or get a
+  separate narrow lint.
+- Add a docs check for completion-specific reference text if completion behavior
+  starts drifting from `docs/usage.md`.
 - Keep exact command syntax out of `docs/spec.md`; usage remains the user-facing
   reference.
 
