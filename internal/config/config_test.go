@@ -108,13 +108,21 @@ name = "demo"
 [services.web]
 domain = "web_gate.localhost"
 `,
-		"acme without dns": `
+		"unsupported acme tls": `
 [project]
 name = "demo"
 
 [services.web]
 domain = "app.example.com"
 tls = "acme"
+`,
+		"unsupported acme dns": `
+[project]
+name = "demo"
+
+[services.web]
+domain = "app.example.com"
+acme_dns = "cloudflare"
 `,
 		"bad tls": `
 [project]

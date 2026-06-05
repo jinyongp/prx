@@ -33,7 +33,7 @@ command's flags and positional arguments.
 | `gate untrust` | remove the local root CA from trust stores |
 | `gate ca export [--out path]` | export the local root certificate |
 | `gate doctor [--fix] [--json]` | check and repair gate-owned local state |
-| `gate expose [--via local\|lan\|cloudflared\|tailscale] [--auth user:pass] [-g\|--global] [-p name\|--project name] <service> [--json]` | expose a scoped service through a provider |
+| `gate expose [--via local\|lan\|cloudflared\|tailscale] [--auth user:pass] [--no-auth] [-g\|--global] [-p name\|--project name] <service> [--json]` | expose a scoped service through a provider |
 | `gate expose ls [--via provider] [-g\|--global] [-p name\|--project name] [-a\|--all] [--json]` | list exposure records |
 | `gate expose stop [--via provider] [--force] [-g\|--global] [-p name\|--project name] <service> [--json]` | stop or forget one exposure record |
 | `gate upgrade [-y\|--yes]` | upgrade to the latest release, then run doctor |
@@ -519,8 +519,12 @@ this quick-tunnel mode.
 Example:
 
 ```bash
-gate expose web --via cloudflared
+gate expose web --via cloudflared --auth user:pass
 ```
+
+The auth secret is session-scoped. `exposures.json` records only that auth is
+enabled, not the password. If a later route reload reports the auth secret as
+missing, run `gate expose web --via cloudflared --auth user:pass` again.
 
 The command starts a quick tunnel to `https://<service-domain>` and prints a
 `trycloudflare.com` URL:
@@ -530,14 +534,14 @@ web exposed via cloudflared
   https://random-name.trycloudflare.com -> app.localhost
 ```
 
-For a public URL, prefer auth:
+For an intentionally unauthenticated public URL, pass `--no-auth`:
 
 ```bash
-gate expose web --via cloudflared --auth user:pass
+gate expose web --via cloudflared --no-auth
 ```
 
 > [!IMPORTANT]
-> Without `--auth`, anyone with the public URL can reach your dev server.
+> With `--no-auth`, anyone with the public URL can reach your dev server.
 
 List exposure records:
 

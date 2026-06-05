@@ -7,11 +7,13 @@ import (
 	"context"
 	"crypto/subtle"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
 	"net/http/httputil"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -100,6 +102,19 @@ func (s *Server) RouteCount() int {
 	return len(*m)
 }
 
+// Routes returns a snapshot copy of the active route table.
+func (s *Server) Routes() []Route {
+	m := s.routes.Load()
+	if m == nil {
+		return nil
+	}
+	routes := make([]Route, 0, len(*m))
+	for _, route := range *m {
+		routes = append(routes, *route)
+	}
+	return routes
+}
+
 // SetHTTPSAddr records the HTTPS listener so plaintext redirects can include a
 // non-default port in no-sudo mode.
 func (s *Server) SetHTTPSAddr(addr string) {
@@ -163,7 +178,11 @@ func remoteAllowed(remoteAddr string, exposed bool) bool {
 // basicAuthOK validates request credentials against userpass ("user:pass")
 // using constant-time comparison.
 func basicAuthOK(r *http.Request, userpass string) bool {
-	wantUser, wantPass, _ := strings.Cut(userpass, ":")
+	normalized, err := NormalizeBasicAuth(userpass)
+	if err != nil {
+		return false
+	}
+	wantUser, wantPass, _ := strings.Cut(normalized, ":")
 	user, pass, ok := r.BasicAuth()
 	if !ok {
 		return false
@@ -171,6 +190,50 @@ func basicAuthOK(r *http.Request, userpass string) bool {
 	userEq := subtle.ConstantTimeCompare([]byte(user), []byte(wantUser)) == 1
 	passEq := subtle.ConstantTimeCompare([]byte(pass), []byte(wantPass)) == 1
 	return userEq && passEq
+}
+
+// NormalizeBasicAuth validates userpass as "user:pass" and returns the
+// canonical stored form. Usernames are trimmed; passwords are preserved.
+func NormalizeBasicAuth(userpass string) (string, error) {
+	user, pass, ok := strings.Cut(userpass, ":")
+	if !ok {
+		return "", errors.New("auth must be user:pass")
+	}
+	user = strings.TrimSpace(user)
+	if user == "" {
+		return "", errors.New("auth user must not be empty")
+	}
+	if pass == "" {
+		return "", errors.New("auth password must not be empty")
+	}
+	return user + ":" + pass, nil
+}
+
+// ValidateRoute checks the daemon route input contract before a route is
+// installed in the live proxy table.
+func ValidateRoute(route Route) error {
+	domain := canonicalDomain(route.Domain)
+	if err := validateDomain(domain); err != nil {
+		return err
+	}
+	host, port, err := net.SplitHostPort(route.Upstream)
+	if err != nil {
+		return fmt.Errorf("invalid upstream %q", route.Upstream)
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("upstream must be loopback, got %q", route.Upstream)
+	}
+	p, err := strconv.Atoi(port)
+	if err != nil || p < 1 || p > 65535 {
+		return fmt.Errorf("invalid upstream port %q", route.Upstream)
+	}
+	if route.Auth != "" {
+		if _, err := NormalizeBasicAuth(route.Auth); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func isLoopback(remoteAddr string) bool {
@@ -202,6 +265,34 @@ func redirectHostPort(addr string) string {
 
 func canonicalDomain(domain string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
+}
+
+func validateDomain(domain string) error {
+	if domain == "" || len(domain) > 253 {
+		return fmt.Errorf("invalid domain %q", domain)
+	}
+	for _, label := range strings.Split(domain, ".") {
+		if !validDomainLabel(label) {
+			return fmt.Errorf("invalid domain %q", domain)
+		}
+	}
+	return nil
+}
+
+func validDomainLabel(label string) bool {
+	if label == "" || len(label) > 63 {
+		return false
+	}
+	for i, r := range label {
+		valid := (r >= 'a' && r <= 'z') || (r >= '0' && r <= '9') || r == '-'
+		if !valid {
+			return false
+		}
+		if (i == 0 || i == len(label)-1) && r == '-' {
+			return false
+		}
+	}
+	return true
 }
 
 func dialLive(upstream string) bool {

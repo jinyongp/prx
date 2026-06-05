@@ -47,7 +47,7 @@ fi
 | `gate port [-g\|--global] [-p name\|--project name] [-a\|--all] [service] [--json]` | print one scoped service port, or list reserved ports |
 | `gate run [-g\|--global] [-p name\|--project name] <service> -- <cmd...>` | run a command with `PORT` injected |
 | `gate down [-g\|--global] [-p name\|--project name] [--json]` | deactivate scoped routes (reservations kept) |
-| `gate expose [--via <provider>] [--auth user:pass] [-g\|--global] [-p name\|--project name] <service> [--json]` | reach a scoped service externally |
+| `gate expose [--via <provider>] [--auth user:pass] [--no-auth] [-g\|--global] [-p name\|--project name] <service> [--json]` | reach a scoped service externally |
 | `gate expose ls [--via provider] [-g\|--global] [-p name\|--project name] [-a\|--all] [--json]` | list exposure records |
 | `gate expose stop [--via <provider>] [--force] [-g\|--global] [-p name\|--project name] <service> [--json]` | stop one exposure |
 | `gate daemon status [-a\|--all] [--json]` | inspect listener proxy status |

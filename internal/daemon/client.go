@@ -53,6 +53,25 @@ func (c *Client) Status() (Status, error) {
 	return s, json.NewDecoder(resp.Body).Decode(&s)
 }
 
+// Routes fetches the daemon's redacted route table.
+func (c *Client) Routes() ([]RouteStatus, error) {
+	var out struct {
+		Routes []RouteStatus `json:"routes"`
+	}
+	resp, err := c.http.Get("http://unix/routes")
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("daemon routes: %s", resp.Status)
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return nil, err
+	}
+	return out.Routes, nil
+}
+
 // SetRoutes pushes the route table to the daemon (triggering a hot reload).
 func (c *Client) SetRoutes(routes []proxy.Route) error {
 	body, err := json.Marshal(routes)

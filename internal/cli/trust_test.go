@@ -21,12 +21,16 @@ type fakeExposeProvider struct {
 	called  *int
 	stopped *int
 	closed  *int
+	auth    *string
 	result  expose.Result
 }
 
-func (p fakeExposeProvider) Expose(_ context.Context, domain string, _ expose.Opts) (expose.Result, error) {
+func (p fakeExposeProvider) Expose(_ context.Context, domain string, opts expose.Opts) (expose.Result, error) {
 	if p.called != nil {
 		*p.called++
+	}
+	if p.auth != nil {
+		*p.auth = opts.Auth
 	}
 	if p.result.URL != "" {
 		return p.result, nil
@@ -249,16 +253,21 @@ func TestExposeScopedGlobalAndNamedProjectReload(t *testing.T) {
 	if code := Expose([]string{"-g", "web", "--via", "local"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Expose -g exit = %d, stderr=%s", code, errb.String())
 	}
-	if code := Expose([]string{"-p", "demo", "api", "--via", "local", "--auth", "user:pass"}, &out, &errb); code != ExitOK {
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		return fakeExposeProvider{}, nil
+	}
+	if code := Expose([]string{"-p", "demo", "api", "--via", "lan", "--auth", "user:pass"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Expose -p exit = %d, stderr=%s", code, errb.String())
 	}
 	if len(calls) != 2 {
 		t.Fatalf("reload calls = %+v", calls)
 	}
-	if calls[0].scope != defaultListenerRef().String() || len(calls[0].routes) != 2 || !routeExposed(calls[0].routes, "web.localhost", "") {
+	if calls[0].scope != defaultListenerRef().String() || len(calls[0].routes) != 2 || routeExposed(calls[0].routes, "web.localhost", "") {
 		t.Fatalf("first reload = %+v", calls[0])
 	}
-	if calls[1].scope != defaultListenerRef().String() || len(calls[1].routes) != 2 || !routeExposed(calls[1].routes, "web.localhost", "") || !routeExposed(calls[1].routes, "api.localhost", "user:pass") {
+	if calls[1].scope != defaultListenerRef().String() || len(calls[1].routes) != 2 || routeExposed(calls[1].routes, "web.localhost", "") || !routeExposed(calls[1].routes, "api.localhost", "user:pass") {
 		t.Fatalf("second reload = %+v", calls[1])
 	}
 }
@@ -371,11 +380,17 @@ func TestExposePreservesExistingSessionRoutesInScope(t *testing.T) {
 		return oldSetRoutes(scope, routes)
 	}
 
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		return fakeExposeProvider{}, nil
+	}
+
 	var out, errb bytes.Buffer
-	if code := Expose([]string{"-g", "web", "--via", "local", "--auth", "web:pass"}, &out, &errb); code != ExitOK {
+	if code := Expose([]string{"-g", "web", "--via", "lan", "--auth", "web:pass"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Expose web exit = %d, stderr=%s", code, errb.String())
 	}
-	if code := Expose([]string{"-g", "api", "--via", "local", "--auth", "api:pass"}, &out, &errb); code != ExitOK {
+	if code := Expose([]string{"-g", "api", "--via", "lan", "--auth", "api:pass"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Expose api exit = %d, stderr=%s", code, errb.String())
 	}
 	if len(calls) != 2 {
@@ -426,14 +441,14 @@ func TestExposeLsAndStop(t *testing.T) {
 	}
 
 	var out, errb bytes.Buffer
-	if code := Expose([]string{"-g", "web", "--via", "local", "--auth", "user:pass"}, &out, &errb); code != ExitOK {
+	if code := Expose([]string{"-g", "web", "--via", "local"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Expose exit = %d, stderr=%s", code, errb.String())
 	}
 	out.Reset()
 	if code := Expose([]string{"ls", "-g", "--json"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Expose ls exit = %d, stderr=%s", code, errb.String())
 	}
-	if !strings.Contains(out.String(), `"auth": true`) || !strings.Contains(out.String(), `"provider": "local"`) {
+	if !strings.Contains(out.String(), `"auth": false`) || !strings.Contains(out.String(), `"provider": "local"`) {
 		t.Fatalf("ls json = %s", out.String())
 	}
 	out.Reset()
@@ -447,8 +462,251 @@ func TestExposeLsAndStop(t *testing.T) {
 		t.Fatalf("reload calls = %+v", calls)
 	}
 	final := calls[len(calls)-1]
-	if routeExposed(final, "web.localhost", "user:pass") {
+	if routeExposed(final, "web.localhost", "") {
 		t.Fatalf("final routes should not be exposed: %+v", final)
+	}
+}
+
+func TestExposeRejectsLocalAuthBeforeProviderCall(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	calls := 0
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		return fakeExposeProvider{called: &calls}, nil
+	}
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"-g", "web", "--via", "local", "--auth", "user:pass"}, &out, &errb); code != ExitUsage {
+		t.Fatalf("Expose exit = %d, stderr=%s", code, errb.String())
+	}
+	if calls != 0 {
+		t.Fatalf("provider called %d times", calls)
+	}
+}
+
+func TestExposeRejectsEmptyViaAuthBeforeProviderCall(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	calls := 0
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		calls++
+		return fakeExposeProvider{}, nil
+	}
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"-g", "web", "--via=", "--auth", "user:pass"}, &out, &errb); code != ExitUsage {
+		t.Fatalf("Expose exit = %d, stderr=%s", code, errb.String())
+	}
+	if calls != 0 {
+		t.Fatalf("provider called %d times", calls)
+	}
+}
+
+func TestExposeStoresEmptyViaAsLocal(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"-g", "web", "--via="}, &out, &errb); code != ExitOK {
+		t.Fatalf("Expose exit = %d, stderr=%s", code, errb.String())
+	}
+	records, err := exposureStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 1 || records[0].Provider != expose.ProviderLocal || records[0].AuthEnabled {
+		t.Fatalf("records = %+v", records)
+	}
+}
+
+func TestExposeRejectsMalformedAuthBeforeProviderCall(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	calls := 0
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		return fakeExposeProvider{called: &calls}, nil
+	}
+	for _, auth := range []string{"admin", ":pass", "user:", "   :pass"} {
+		t.Run(auth, func(t *testing.T) {
+			var out, errb bytes.Buffer
+			if code := Expose([]string{"-g", "web", "--via", "lan", "--auth", auth}, &out, &errb); code != ExitUsage {
+				t.Fatalf("Expose exit = %d, stderr=%s", code, errb.String())
+			}
+		})
+	}
+	if calls != 0 {
+		t.Fatalf("provider called %d times", calls)
+	}
+	records, err := exposureStore().Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(records) != 0 {
+		t.Fatalf("records = %+v", records)
+	}
+}
+
+func TestExposeAcceptsColonInPassword(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	var gotAuth string
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		return fakeExposeProvider{auth: &gotAuth}, nil
+	}
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"-g", "web", "--via", "lan", "--auth", "user:p:a:s:s"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Expose exit = %d, stderr=%s", code, errb.String())
+	}
+	if gotAuth != "user:p:a:s:s" {
+		t.Fatalf("auth = %q", gotAuth)
+	}
+	b, err := os.ReadFile(filepath.Join(paths.ConfigDir(), "exposures.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(b), "p:a:s:s") {
+		t.Fatalf("exposures.json leaked auth secret:\n%s", string(b))
+	}
+	if !strings.Contains(string(b), `"auth_enabled": true`) {
+		t.Fatalf("exposures.json missing auth flag:\n%s", string(b))
+	}
+}
+
+func TestExposeCloudflaredRequiresAuthOrNoAuth(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	calls := 0
+	var gotAuth string
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		return fakeExposeProvider{called: &calls, auth: &gotAuth}, nil
+	}
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"-g", "web", "--via", "cloudflared"}, &out, &errb); code != ExitUsage {
+		t.Fatalf("Expose missing auth exit = %d, stderr=%s", code, errb.String())
+	}
+	if calls != 0 {
+		t.Fatalf("provider called before auth requirement")
+	}
+	if code := Expose([]string{"-g", "web", "--via", "cloudflared", "--auth", "user:pass"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Expose auth exit = %d, stderr=%s", code, errb.String())
+	}
+	if gotAuth != "user:pass" {
+		t.Fatalf("auth = %q", gotAuth)
+	}
+	gotAuth = "not reset"
+	if code := Expose([]string{"-g", "web", "--via", "cloudflared", "--no-auth"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Expose --no-auth exit = %d, stderr=%s", code, errb.String())
+	}
+	if gotAuth != "" {
+		t.Fatalf("auth with --no-auth = %q", gotAuth)
+	}
+}
+
+func TestExposeLsReportsMissingAuthSecret(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := exposureStore().Upsert(expose.Record{
+		Scope: daemonScopeGlobal, Service: "web", Provider: expose.ProviderLAN,
+		PublicURL: "https://web.localhost", Target: "web.localhost", AuthEnabled: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		return fakeExposeProvider{}, nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"ls", "-g", "--json"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Expose ls json exit = %d, stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), `"auth": true`) || !strings.Contains(out.String(), `"auth_status": "missing"`) {
+		t.Fatalf("ls json = %s", out.String())
+	}
+	out.Reset()
+	if code := Expose([]string{"ls", "-g"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Expose ls exit = %d, stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "missing") {
+		t.Fatalf("ls plain = %s", out.String())
+	}
+}
+
+func TestExposeLsReportsActiveAuthSecret(t *testing.T) {
+	isolate(t)
+	shortConfigDir, err := os.MkdirTemp("/tmp", "gate-cli-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(shortConfigDir) })
+	t.Setenv("XDG_CONFIG_HOME", shortConfigDir)
+	t.Setenv("XDG_STATE_HOME", shortConfigDir)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "web.localhost", Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv := proxy.New(nil, nil)
+	stopListener, err := daemon.ServeAdmin(context.Background(), defaultListenerRef().socketPath(), srv)
+	if err != nil {
+		t.Fatalf("ServeAdmin listener: %v", err)
+	}
+	defer stopListener()
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		return fakeExposeProvider{}, nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"-g", "web", "--via", "lan", "--auth", "user:pass"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Expose exit = %d, stderr=%s", code, errb.String())
+	}
+	exposeSessionMu.Lock()
+	exposeSessionRoutes = map[string]map[string]exposeSessionRoute{}
+	exposeSessionMu.Unlock()
+	out.Reset()
+	if code := Expose([]string{"ls", "-g", "--json"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Expose ls exit = %d, stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), `"auth_status": "active"`) {
+		t.Fatalf("ls json = %s", out.String())
 	}
 }
 

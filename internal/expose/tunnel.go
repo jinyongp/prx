@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -13,6 +14,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 )
 
 // Cloudflared exposes a route as a public URL via the cloudflared binary.
@@ -24,11 +26,18 @@ type Cloudflared struct {
 
 var trycloudflareRe = regexp.MustCompile(`https://[a-z0-9-]+\.trycloudflare\.com`)
 
+var (
+	cloudflaredStartupTimeout = 20 * time.Second
+	cloudflaredCommand        = func(ctx context.Context, domain string) *exec.Cmd {
+		//nolint:gosec // G204: fixed binary; domain comes from the project config.
+		return exec.CommandContext(ctx, "cloudflared", "tunnel", "--url", "https://"+domain)
+	}
+)
+
 // Expose starts a quick tunnel to the local HTTPS address for domain and
 // returns the public URL cloudflared prints.
 func (c *Cloudflared) Expose(ctx context.Context, domain string, _ Opts) (Result, error) {
-	//nolint:gosec // G204: fixed binary; domain comes from the project config.
-	cmd := exec.CommandContext(ctx, "cloudflared", "tunnel", "--url", "https://"+domain)
+	cmd := cloudflaredCommand(ctx, domain)
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return Result{}, err
@@ -43,21 +52,71 @@ func (c *Cloudflared) Expose(ctx context.Context, domain string, _ Opts) (Result
 	c.waitc = waitc
 	c.mu.Unlock()
 
+	urlc := make(chan cloudflaredURLResult, 1)
+	go scanCloudflaredURL(stderr, urlc)
+	timer := time.NewTimer(cloudflaredStartupTimeout)
+	defer timer.Stop()
+
+	select {
+	case got := <-urlc:
+		if got.err != nil {
+			_ = c.killAndClear(cmd, waitc)
+			return Result{}, got.err
+		}
+		if got.url == "" {
+			_ = c.killAndClear(cmd, waitc)
+			return Result{}, fmt.Errorf("expose: cloudflared did not report a public URL")
+		}
+		return Result{URL: got.url, PID: cmd.Process.Pid, Command: strings.Join(cmd.Args, " ")}, nil
+	case <-timer.C:
+		_ = c.killAndClear(cmd, waitc)
+		return Result{}, fmt.Errorf("expose: cloudflared did not report a public URL before startup timeout")
+	case <-ctx.Done():
+		_ = c.killAndClear(cmd, waitc)
+		return Result{}, ctx.Err()
+	}
+}
+
+type cloudflaredURLResult struct {
+	url string
+	err error
+}
+
+func scanCloudflaredURL(stderr io.Reader, out chan<- cloudflaredURLResult) {
 	scanner := bufio.NewScanner(stderr)
 	for scanner.Scan() {
 		if url := trycloudflareRe.FindString(scanner.Text()); url != "" {
-			// Keep draining stderr so the pipe buffer never fills and stalls
-			// the long-running tunnel process.
-			go func() {
-				for scanner.Scan() {
-				}
-			}()
-			return Result{URL: url, PID: cmd.Process.Pid, Command: strings.Join(cmd.Args, " ")}, nil
+			out <- cloudflaredURLResult{url: url}
+			for scanner.Scan() {
+			}
+			return
 		}
 	}
-	_ = cmd.Process.Kill()
-	<-waitc
-	return Result{}, fmt.Errorf("expose: cloudflared did not report a public URL")
+	if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
+		out <- cloudflaredURLResult{err: fmt.Errorf("expose: cloudflared stderr: %w", err)}
+		return
+	}
+	out <- cloudflaredURLResult{}
+}
+
+func killAndWait(cmd *exec.Cmd, waitc <-chan error) error {
+	if cmd.Process != nil {
+		_ = cmd.Process.Kill()
+	}
+	if waitc != nil {
+		return <-waitc
+	}
+	return nil
+}
+
+func (c *Cloudflared) killAndClear(cmd *exec.Cmd, waitc <-chan error) error {
+	c.mu.Lock()
+	if c.cmd == cmd {
+		c.cmd = nil
+		c.waitc = nil
+	}
+	c.mu.Unlock()
+	return killAndWait(cmd, waitc)
 }
 
 func (c *Cloudflared) Status(_ context.Context, record Record) (string, error) {

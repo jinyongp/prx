@@ -1,14 +1,20 @@
 package ca
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/pem"
 	"errors"
+	"math/big"
 	"os"
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 )
 
 func loadCA(t *testing.T) (*CA, string) {
@@ -79,6 +85,90 @@ func TestLoadExistingLoadsPersistedRoot(t *testing.T) {
 	}
 }
 
+func TestLoadRejectsInvalidRootMaterial(t *testing.T) {
+	cases := map[string]func(*x509.Certificate){
+		"non CA": func(tmpl *x509.Certificate) {
+			tmpl.IsCA = false
+		},
+		"missing basic constraints": func(tmpl *x509.Certificate) {
+			tmpl.BasicConstraintsValid = false
+		},
+		"expired": func(tmpl *x509.Certificate) {
+			tmpl.NotBefore = time.Now().Add(-2 * time.Hour)
+			tmpl.NotAfter = time.Now().Add(-time.Hour)
+		},
+		"not yet valid": func(tmpl *x509.Certificate) {
+			tmpl.NotBefore = time.Now().Add(time.Hour)
+			tmpl.NotAfter = time.Now().Add(2 * time.Hour)
+		},
+		"missing cert sign usage": func(tmpl *x509.Certificate) {
+			tmpl.KeyUsage = x509.KeyUsageDigitalSignature
+		},
+	}
+	for name, mutate := range cases {
+		t.Run(name, func(t *testing.T) {
+			base := t.TempDir()
+			writeRootMaterial(t, base, mutate, false)
+			if _, err := LoadExisting(base); err == nil {
+				t.Fatal("LoadExisting succeeded")
+			}
+		})
+	}
+}
+
+func TestLoadRejectsMismatchedRootKey(t *testing.T) {
+	base := t.TempDir()
+	writeRootMaterial(t, base, nil, true)
+	if _, err := LoadExisting(base); err == nil {
+		t.Fatal("LoadExisting succeeded with mismatched key")
+	}
+}
+
+func TestLoadDoesNotRewriteInvalidRootMaterial(t *testing.T) {
+	base := t.TempDir()
+	writeRootMaterial(t, base, func(tmpl *x509.Certificate) {
+		tmpl.IsCA = false
+	}, false)
+	crtPath := filepath.Join(base, "ca", "root.crt")
+	keyPath := filepath.Join(base, "ca", "root.key")
+	if err := os.Chmod(keyPath, 0o644); err != nil { //nolint:gosec // Exercises invalid material without chmod side effects.
+		t.Fatal(err)
+	}
+	originalCert, err := os.ReadFile(crtPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalKey, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalKeyInfo, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := Load(base); err == nil {
+		t.Fatal("Load succeeded with invalid persisted root")
+	}
+	certAfter, err := os.ReadFile(crtPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyAfter, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(certAfter) != string(originalCert) || string(keyAfter) != string(originalKey) {
+		t.Fatal("Load rewrote invalid persisted root material")
+	}
+	keyInfoAfter, err := os.Stat(keyPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if keyInfoAfter.Mode().Perm() != originalKeyInfo.Mode().Perm() {
+		t.Fatalf("Load changed invalid root key mode from %o to %o", originalKeyInfo.Mode().Perm(), keyInfoAfter.Mode().Perm())
+	}
+}
+
 func TestLoadCertificateDoesNotRequireRootKey(t *testing.T) {
 	base := t.TempDir()
 	generated, err := Load(base)
@@ -94,6 +184,53 @@ func TestLoadCertificateDoesNotRequireRootKey(t *testing.T) {
 	}
 	if loaded.Fingerprint() != generated.Fingerprint() {
 		t.Fatal("LoadCertificate loaded different root CA")
+	}
+}
+
+func writeRootMaterial(t *testing.T, base string, mutate func(*x509.Certificate), mismatchKey bool) {
+	t.Helper()
+	dir := filepath.Join(base, "ca")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	certKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	storedKey := certKey
+	if mismatchKey {
+		storedKey, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(1),
+		Subject:               pkix.Name{CommonName: rootCN},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		BasicConstraintsValid: true,
+		IsCA:                  true,
+	}
+	if mutate != nil {
+		mutate(tmpl)
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &certKey.PublicKey, certKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	crtPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	if err := os.WriteFile(filepath.Join(dir, "root.crt"), crtPEM, 0o644); err != nil { //nolint:gosec // root cert is public test material.
+		t.Fatal(err)
+	}
+	keyDER, err := x509.MarshalPKCS8PrivateKey(storedKey)
+	if err != nil {
+		t.Fatal(err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: keyDER})
+	if err := os.WriteFile(filepath.Join(dir, "root.key"), keyPEM, 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
 

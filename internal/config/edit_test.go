@@ -68,8 +68,7 @@ name = "myapp"
 # keep service comment
 domain = "old.example.com" # old inline
 port = "${WEB_PORT:-3000}"
-tls = "acme"
-acme_dns = "cloudflare"
+custom = "keep"
 `
 	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
 		t.Fatal(err)
@@ -83,8 +82,7 @@ acme_dns = "cloudflare"
 		"# keep service comment",
 		`domain = "new.example.com"`,
 		"port = 4312",
-		`tls = "acme"`,
-		`acme_dns = "cloudflare"`,
+		`custom = "keep"`,
 	} {
 		if !strings.Contains(s, want) {
 			t.Fatalf("output missing %q:\n%s", want, s)

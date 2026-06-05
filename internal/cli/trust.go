@@ -126,6 +126,7 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("expose", flag.ContinueOnError)
 	via := fs.String("via", "local", "provider: local|lan|cloudflared|tailscale")
 	auth := fs.String("auth", "", "require basic auth as user:pass")
+	noAuth := fs.Bool("no-auth", false, "expose cloudflared without basic auth")
 	jsonOut := fs.Bool("json", false, "emit JSON")
 	scopeFlags := defineDaemonScopeFlags(fs, false)
 	if handled, code := parseFlags(fs, "expose", args, stdout, stderr); handled {
@@ -147,18 +148,23 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 	if !res.Active {
 		return fail(stderr, *jsonOut, ExitError, "not_active", fmt.Sprintf("reservation %q is not active; run gate up first", svc))
 	}
-	provider, err := exposeProviderFor(*via)
+	providerName := normalizeExposeProvider(*via)
+	routeAuth, err := exposeRouteAuth(providerName, *auth, *noAuth)
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitUsage, "bad_auth", err.Error())
+	}
+	provider, err := exposeProviderFor(providerName)
 	if err != nil {
 		return fail(stderr, *jsonOut, ExitUsage, "bad_provider", err.Error())
 	}
-	if *auth == "" && *via != "local" {
+	if routeAuth == "" && providerName != expose.ProviderLocal {
 		printWarning(stderr, "exposing without --auth; anyone with the URL can reach your dev server")
 	}
 	var activity activityHandle
-	if exposeActivityAllowed(*via) {
+	if exposeActivityAllowed(providerName) {
 		activity = startActivity(stderr, *jsonOut, "starting tunnel")
 	}
-	result, err := provider.Expose(context.Background(), res.Domain, expose.Opts{Auth: *auth})
+	result, err := provider.Expose(context.Background(), res.Domain, expose.Opts{Auth: routeAuth})
 	if activity != nil {
 		if err != nil {
 			activity.Stop()
@@ -170,18 +176,18 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, *jsonOut, ExitError, "expose_failed", err.Error())
 	}
 
-	// Mark the route exposed (so non-loopback clients are allowed) and apply
-	// optional auth, then hot-reload the listener daemon. Auth is session-scoped:
-	// it lives in the in-memory route table, not the persisted registry.
+	// External providers lift the loopback guard and can apply optional auth,
+	// then the listener daemon is hot-reloaded. Auth is session-scoped: it lives
+	// in the in-memory route table, not the persisted registry.
 	ref := listenerRefFor(res.ListenerPair())
 	record := expose.Record{
 		Scope:       exposureScope(res),
 		Project:     res.Project,
 		Service:     res.Service,
-		Provider:    *via,
+		Provider:    providerName,
 		PublicURL:   result.URL,
 		Target:      res.Domain,
-		AuthEnabled: *auth != "",
+		AuthEnabled: routeAuth != "",
 		PID:         result.PID,
 		Command:     result.Command,
 	}
@@ -200,7 +206,9 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 			return fail(stderr, *jsonOut, ExitError, "registry", rerr.Error())
 		}
 		routes := activeRoutesForListener(reg, ref.Pair)
-		applyExposeSession(ref.String(), routes, res.Domain, *auth)
+		if externalExposureProvider(providerName) {
+			applyExposeSession(ref.String(), routes, res.Domain, routeAuth)
+		}
 		if err := applyExposureRecords(ref.String(), routes); err != nil {
 			cleanupExposureProvider(provider, record)
 			if rollbackErr := removeExposureRecordFromStore(record); rollbackErr != nil {
@@ -222,7 +230,7 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 	}
 
 	if *jsonOut {
-		out := map[string]any{"service": svc, "provider": *via, "public_url": result.URL, "target": res.Domain}
+		out := map[string]any{"service": svc, "provider": providerName, "public_url": result.URL, "target": res.Domain}
 		if res.Project != "" {
 			out["project"] = res.Project
 		} else {
@@ -230,20 +238,21 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 		}
 		return writeJSON(stdout, out)
 	}
-	printSuccess(stdout, fmt.Sprintf("%s exposed via %s", displayReservationOwner(res), *via))
+	printSuccess(stdout, fmt.Sprintf("%s exposed via %s", displayReservationOwner(res), providerName))
 	printKV(stdout, result.URL, res.Domain)
 	return ExitOK
 }
 
 type exposeRow struct {
-	Scope     string `json:"scope"`
-	Project   string `json:"project,omitempty"`
-	Service   string `json:"service"`
-	Provider  string `json:"provider"`
-	PublicURL string `json:"public_url"`
-	Target    string `json:"target"`
-	Auth      bool   `json:"auth"`
-	Status    string `json:"status"`
+	Scope      string `json:"scope"`
+	Project    string `json:"project,omitempty"`
+	Service    string `json:"service"`
+	Provider   string `json:"provider"`
+	PublicURL  string `json:"public_url"`
+	Target     string `json:"target"`
+	Auth       bool   `json:"auth"`
+	AuthStatus string `json:"auth_status"`
+	Status     string `json:"status"`
 }
 
 func exposeLs(args []string, stdout, stderr io.Writer) int {
@@ -261,6 +270,10 @@ func exposeLs(args []string, stdout, stderr io.Writer) int {
 	records, err := exposureStore().Read()
 	if err != nil {
 		return fail(stderr, *jsonOut, ExitError, "expose_store", err.Error())
+	}
+	reg, err := registryStore().Read()
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitError, "registry", err.Error())
 	}
 	rows := make([]exposeRow, 0, len(records))
 	for _, record := range records {
@@ -280,7 +293,7 @@ func exposeLs(args []string, stdout, stderr io.Writer) int {
 		rows = append(rows, exposeRow{
 			Scope: record.Scope, Project: record.Project, Service: record.Service,
 			Provider: record.Provider, PublicURL: record.PublicURL, Target: record.Target,
-			Auth: record.AuthEnabled, Status: status,
+			Auth: record.AuthEnabled, AuthStatus: exposureAuthStatus(record, reg), Status: status,
 		})
 	}
 	if *jsonOut {
@@ -295,7 +308,7 @@ func exposeLs(args []string, stdout, stderr io.Writer) int {
 		data := make([][]string, 0, len(rows))
 		for _, row := range rows {
 			data = append(data, []string{
-				row.Service, row.Status, row.Provider, row.PublicURL, row.Target, row.Scope, fmt.Sprintf("%t", row.Auth),
+				row.Service, row.Status, row.Provider, row.PublicURL, row.Target, row.Scope, row.AuthStatus,
 			})
 		}
 		fmt.Fprintln(stdout, ui.Render(headers, data))
@@ -304,10 +317,51 @@ func exposeLs(args []string, stdout, stderr io.Writer) int {
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
 	fmt.Fprintln(tw, "SERVICE\tSTATUS\tPROVIDER\tPUBLIC URL\tTARGET\tSCOPE\tAUTH")
 	for _, row := range rows {
-		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%t\n", row.Service, row.Status, row.Provider, row.PublicURL, row.Target, row.Scope, row.Auth)
+		fmt.Fprintf(tw, "%s\t%s\t%s\t%s\t%s\t%s\t%s\n", row.Service, row.Status, row.Provider, row.PublicURL, row.Target, row.Scope, row.AuthStatus)
 	}
 	_ = tw.Flush()
 	return ExitOK
+}
+
+func exposureAuthStatus(record expose.Record, reg *registry.Registry) string {
+	if !record.AuthEnabled {
+		return "off"
+	}
+	res, ok := exposureRecordReservation(record, reg)
+	if !ok {
+		return "missing"
+	}
+	ref := listenerRefFor(res.ListenerPair())
+	if routeAuthActive(ref, record.Target) {
+		return "active"
+	}
+	exposeSessionMu.Lock()
+	defer exposeSessionMu.Unlock()
+	if session, ok := exposeSessionRoutes[ref.String()][record.Target]; ok && session.Auth != "" {
+		return "active"
+	}
+	return "missing"
+}
+
+func routeAuthActive(ref listenerDaemonRef, domain string) bool {
+	routes, err := daemonClientForRef(ref).Routes()
+	if err != nil {
+		return false
+	}
+	for _, route := range routes {
+		if route.Domain == domain {
+			return route.Auth
+		}
+	}
+	return false
+}
+
+func exposureRecordReservation(record expose.Record, reg *registry.Registry) (registry.Reservation, bool) {
+	project := ""
+	if record.Scope == daemonScopeProject {
+		project = record.Project
+	}
+	return reg.Get(registry.Key(project, record.Service))
 }
 
 func exposeStop(args []string, stdout, stderr io.Writer) int {
@@ -382,6 +436,41 @@ func exposeActivityAllowed(via string) bool {
 	return via == expose.ProviderCloudflared || via == expose.ProviderTailscale
 }
 
+func exposeRouteAuth(via, userpass string, noAuth bool) (string, error) {
+	if noAuth && via != expose.ProviderCloudflared {
+		return "", fmt.Errorf("--no-auth is only supported with --via cloudflared")
+	}
+	if userpass != "" && noAuth {
+		return "", fmt.Errorf("--auth and --no-auth are mutually exclusive")
+	}
+	if via == expose.ProviderLocal && userpass != "" {
+		return "", fmt.Errorf("--auth is not supported with --via local")
+	}
+	if userpass != "" {
+		return proxy.NormalizeBasicAuth(userpass)
+	}
+	if via == expose.ProviderCloudflared && !noAuth {
+		return "", fmt.Errorf("--via cloudflared requires --auth user:pass or --no-auth")
+	}
+	return "", nil
+}
+
+func normalizeExposeProvider(via string) string {
+	if via == "" {
+		return expose.ProviderLocal
+	}
+	return via
+}
+
+func externalExposureProvider(via string) bool {
+	switch via {
+	case expose.ProviderLAN, expose.ProviderCloudflared, expose.ProviderTailscale:
+		return true
+	default:
+		return false
+	}
+}
+
 func cleanupExposureProvider(provider expose.Provider, record expose.Record) {
 	_ = provider.Stop(context.Background(), record, expose.StopOpts{Force: true})
 	_ = provider.Close()
@@ -444,6 +533,9 @@ func applyExposureRecordSet(key string, routes []proxy.Route, records []expose.R
 					continue
 				}
 				routes[i].Auth = session.Auth
+			}
+			if !externalExposureProvider(record.Provider) {
+				continue
 			}
 			routes[i].Exposed = true
 		}

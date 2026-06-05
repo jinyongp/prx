@@ -168,8 +168,6 @@ files win over later ones.
 | --- | --- | --- | --- |
 | `domain` | string | required | Hostname gate routes. Canonicalized as lowercase without trailing dot. |
 | `port` | integer or env string | auto-allocate | Local upstream port. `0` or omitted means allocate from the default pool. |
-| `tls` | `internal` or `acme` | `internal` | Certificate provider for the domain. |
-| `acme_dns` | string | required for `acme` | DNS-01 provider key. |
 
 `domain` and `port` can include environment references through `${NAME}` or
 `${NAME:-fallback}`. `${NAME}` is required and fails if unset. `${NAME:-fallback}`
@@ -306,17 +304,12 @@ failures return exit code `3`.
 ```mermaid
 flowchart TB
     hello["TLS ClientHello<br/>SNI = app.localhost"]
-    provider{"tls provider"}
     internal["internal CA<br/>issue or load leaf cert"]
-    acme["ACME DNS-01<br/>issue public cert"]
     cache["certificate cache"]
     handshake["complete TLS handshake"]
 
-    hello --> provider
-    provider -->|"internal"| internal
-    provider -->|"acme"| acme
+    hello --> internal
     internal --> cache
-    acme --> cache
     cache --> handshake
 ```
 
@@ -334,19 +327,6 @@ gate ca export --out gate-root.crt
 ```
 
 Never copy or share the root private key.
-
-### ACME
-
-The `acme` provider is for domains the developer actually controls. It uses
-DNS-01 so local inbound ports are not required. `acme_dns` identifies the DNS
-provider integration.
-
-```toml
-[services.api]
-domain = "api.dev.example.com"
-tls = "acme"
-acme_dns = "cloudflare"
-```
 
 ---
 
@@ -438,7 +418,7 @@ that already own the same listener before starting the listener-keyed daemon.
 | `gate port [-g\|--global] [-p name\|--project name] [-a\|--all] [service]` | Print one scoped port or list reserved ports with route/upstream status. | text / json |
 | `gate run [-g\|--global] [-p name\|--project name] <service> -- <cmd>` | Run a child command with `PORT` injected from a scoped reservation. | child stdio |
 | `gate down [-g\|--global] [-p name\|--project name]` | Deactivate scoped routes and preserve reservations. | text / json |
-| `gate expose [--via <provider>] [--auth user:pass] [-g\|--global] [-p name\|--project name] <service>` | Expose a scoped service/name through a provider. | text / json |
+| `gate expose [--via <provider>] [--auth user:pass] [--no-auth] [-g\|--global] [-p name\|--project name] <service>` | Expose a scoped service/name through a provider. | text / json |
 | `gate expose ls [--via provider] [-g\|--global] [-p name\|--project name] [-a\|--all]` | List exposure records with provider status. | text / json |
 | `gate expose stop [--via <provider>] [--force] [-g\|--global] [-p name\|--project name] <service>` | Stop one exposure and remove its record after provider teardown. | text / json |
 | `gate daemon status [-a\|--all]` | Print listener daemon status. | text / json |
@@ -619,7 +599,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | `local` | Same machine | active route | No external exposure. |
 | `lan` | Same network | `.local` domain, reachable machine, trusted CA on clients | gate validates and marks the route exposed; it does not configure other devices' DNS. |
-| `cloudflared` | Public temporary URL | `cloudflared` in `PATH` | Prefer `--auth user:pass`; quick tunnel URL is temporary. |
+| `cloudflared` | Public temporary URL | `cloudflared` in `PATH` | Requires `--auth user:pass` or explicit `--no-auth`; quick tunnel URL is temporary. |
 | `tailscale` | Tailnet | logged-in `tailscale` in `PATH` | Uses Tailscale Serve; detailed teardown is handled with Tailscale commands. |
 
 `gate expose` targets one scoped active route. Without a scope flag it resolves
@@ -683,7 +663,6 @@ flowchart TB
     dns["internal/dns"]
     ca["internal/ca"]
     truststore["internal/truststore"]
-    tlsprov["internal/tlsprov"]
     proxy["internal/proxy"]
     daemon["internal/daemon"]
     expose["internal/expose"]
@@ -698,9 +677,8 @@ flowchart TB
     config --> cli
     port --> cli
     dns --> cli
-    ca --> tlsprov
     truststore --> ca
-    tlsprov --> daemon
+    ca --> daemon
     proxy --> daemon
     daemon --> cli
     expose --> cli
@@ -721,7 +699,6 @@ flowchart TB
 | `internal/dns` | DNS mode selection, `.localhost` no-op, hosts-file provider. |
 | `internal/ca` | Root CA creation, leaf issuance, trust/export commands. |
 | `internal/truststore` | Vendored trust-store implementation. Self-contained, no gate imports. |
-| `internal/tlsprov` | TLS provider abstraction, internal CA provider, ACME/DNS-01 flow. |
 | `internal/proxy` | Host-routing reverse proxy, TLS termination hooks, route hot reload. |
 | `internal/daemon` | Resident process, admin socket API, lifecycle status. |
 | `internal/expose` | Local/LAN/Cloudflared/Tailscale exposure providers and auth handling. |

@@ -15,8 +15,10 @@ import (
 	"syscall"
 	"time"
 
+	"gate/internal/config"
 	"gate/internal/daemon"
 	"gate/internal/paths"
+	"gate/internal/registry"
 	"gate/internal/ui"
 )
 
@@ -73,9 +75,11 @@ func runDoctorChecks(fix bool) []doctorIssue {
 	if issue, ok := checkLegacyDaemonState(fix); ok {
 		issues = append(issues, issue)
 	}
+	issues = append(issues, checkRegistryIntegrity()...)
 	if issue, ok := checkLegacyRegistryAdhoc(fix); ok {
 		issues = append(issues, issue)
 	}
+	issues = append(issues, checkStaleServiceReservations()...)
 	if issue, ok := checkOldScopedDaemonState(fix); ok {
 		issues = append(issues, issue)
 	}
@@ -83,6 +87,68 @@ func runDoctorChecks(fix bool) []doctorIssue {
 		issues = append(issues, issue)
 	}
 	return issues
+}
+
+func checkStaleServiceReservations() []doctorIssue {
+	reg, err := registryStore().Read()
+	if err != nil {
+		return nil
+	}
+	var issues []doctorIssue
+	for _, key := range reg.Keys() {
+		res := reg.Services[key]
+		if res.ConfigPath == "" || !doctorPathExists(res.ConfigPath) {
+			continue
+		}
+		project, err := config.Load(res.ConfigPath)
+		if err != nil {
+			issues = append(issues, doctorIssue{
+				Code:    "registry_config_load_error",
+				Message: fmt.Sprintf("registry reservation %s points to an unreadable project config", key),
+				Paths:   []string{res.ConfigPath},
+				Error:   err.Error(),
+			})
+			continue
+		}
+		if _, ok := project.Services[res.Service]; ok {
+			continue
+		}
+		issues = append(issues, doctorIssue{
+			Code:    "registry_stale_service",
+			Message: fmt.Sprintf("registry reservation %s points to a service missing from %s", key, filepath.Base(res.ConfigPath)),
+			Paths:   []string{res.ConfigPath},
+		})
+	}
+	return issues
+}
+
+func checkRegistryIntegrity() []doctorIssue {
+	registryPath := filepath.Join(paths.ConfigDir(), "registry.json")
+	_, err := registry.Open(registryPath).Read()
+	if errors.Is(err, fs.ErrNotExist) || err == nil {
+		return nil
+	}
+	var unsupported *registry.UnsupportedSchemaError
+	if errors.As(err, &unsupported) {
+		return []doctorIssue{{
+			Code:    "registry_unsupported_schema",
+			Message: unsupported.Error(),
+			Paths:   []string{registryPath},
+		}}
+	}
+	var integrity *registry.IntegrityError
+	if errors.As(err, &integrity) {
+		issues := make([]doctorIssue, 0, len(integrity.Issues))
+		for _, item := range integrity.Issues {
+			issues = append(issues, doctorIssue{
+				Code:    item.Code,
+				Message: item.Message,
+				Paths:   []string{registryPath},
+			})
+		}
+		return issues
+	}
+	return nil
 }
 
 func doctorReportOK(report doctorReport) bool {
@@ -270,6 +336,16 @@ func checkLegacyRegistryAdhoc(fix bool) (doctorIssue, bool) {
 	if err != nil {
 		return doctorIssue{Code: "registry_read_error", Message: "registry could not be read", Paths: []string{registryPath}, Error: err.Error()}, true
 	}
+	if registryJSONVersion(b) > registry.SchemaVersion {
+		return doctorIssue{}, false
+	}
+	if _, err := registryStore().Read(); err != nil {
+		var unsupported *registry.UnsupportedSchemaError
+		var integrity *registry.IntegrityError
+		if errors.As(err, &unsupported) || errors.As(err, &integrity) {
+			return doctorIssue{}, false
+		}
+	}
 	_, count, err := migrateAdhocRegistryJSON(b)
 	if err != nil {
 		return doctorIssue{Code: "registry_invalid_json", Message: "registry JSON is invalid", Paths: []string{registryPath}, Error: err.Error()}, true
@@ -292,6 +368,9 @@ func checkLegacyRegistryAdhoc(fix bool) (doctorIssue, bool) {
 		if len(current) == 0 {
 			return nil, false, nil
 		}
+		if registryJSONVersion(current) > registry.SchemaVersion {
+			return nil, false, nil
+		}
 		migrated, currentCount, err := migrateAdhocRegistryJSON(current)
 		if err != nil {
 			return nil, false, err
@@ -312,6 +391,16 @@ func checkLegacyRegistryAdhoc(fix bool) (doctorIssue, bool) {
 		issue.Message = fmt.Sprintf("converted %d adhoc reservation(s) to standalone", fixedCount)
 	}
 	return issue, true
+}
+
+func registryJSONVersion(b []byte) int {
+	var root struct {
+		Version int `json:"version"`
+	}
+	if err := json.Unmarshal(b, &root); err != nil {
+		return 0
+	}
+	return root.Version
 }
 
 func migrateAdhocRegistryJSON(b []byte) ([]byte, int, error) {

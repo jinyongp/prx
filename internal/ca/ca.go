@@ -232,12 +232,9 @@ func (c *CA) load(crtPath, keyPath string) error {
 	if err != nil {
 		return err
 	}
-	if info, err := os.Stat(keyPath); err != nil {
+	info, err := os.Stat(keyPath)
+	if err != nil {
 		return err
-	} else if info.Mode().Perm()&0o077 != 0 {
-		if err := os.Chmod(keyPath, 0o600); err != nil {
-			return fmt.Errorf("ca: root key %s permissions too broad and chmod failed: %w", keyPath, err)
-		}
 	}
 	keyPEM, err := os.ReadFile(keyPath)
 	if err != nil {
@@ -255,7 +252,42 @@ func (c *CA) load(crtPath, keyPath string) error {
 	if !ok {
 		return errors.New("ca: root key is not ECDSA")
 	}
+	if err := validateRootMaterial(cert, ecKey); err != nil {
+		return err
+	}
+	if info.Mode().Perm()&0o077 != 0 {
+		if err := os.Chmod(keyPath, 0o600); err != nil {
+			return fmt.Errorf("ca: root key %s permissions too broad and chmod failed: %w", keyPath, err)
+		}
+	}
 	c.cert, c.der, c.key = cert, cert.Raw, ecKey
+	return nil
+}
+
+func validateRootMaterial(cert *x509.Certificate, key *ecdsa.PrivateKey) error {
+	if !cert.IsCA {
+		return errors.New("ca: root certificate is not a CA")
+	}
+	if !cert.BasicConstraintsValid {
+		return errors.New("ca: root certificate missing valid basic constraints")
+	}
+	if cert.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return errors.New("ca: root certificate cannot sign certificates")
+	}
+	now := time.Now()
+	if now.Before(cert.NotBefore) {
+		return errors.New("ca: root certificate is not yet valid")
+	}
+	if now.After(cert.NotAfter) {
+		return errors.New("ca: root certificate is expired")
+	}
+	pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
+	if !ok {
+		return errors.New("ca: root certificate public key is not ECDSA")
+	}
+	if !pub.Equal(&key.PublicKey) {
+		return errors.New("ca: root certificate does not match root key")
+	}
 	return nil
 }
 

@@ -124,11 +124,21 @@ func (s *Store) read() (*Registry, error) {
 	if err := json.Unmarshal(b, reg); err != nil {
 		return nil, err
 	}
+	if reg.Version > SchemaVersion {
+		return nil, &UnsupportedSchemaError{Version: reg.Version, Supported: SchemaVersion}
+	}
 	migrate(reg)
+	if issues := reg.Validate(); len(issues) > 0 {
+		return nil, &IntegrityError{Issues: issues}
+	}
 	return reg, nil
 }
 
 func (s *Store) write(reg *Registry) error {
+	migrate(reg)
+	if issues := reg.Validate(); len(issues) > 0 {
+		return &IntegrityError{Issues: issues}
+	}
 	reg.Version = SchemaVersion
 	b, err := json.MarshalIndent(reg, "", "  ")
 	if err != nil {

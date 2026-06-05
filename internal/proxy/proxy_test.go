@@ -248,6 +248,69 @@ func TestRouteAuthEnforced(t *testing.T) {
 	}
 }
 
+func TestRouteAuthMalformedFailsClosed(t *testing.T) {
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer backend.Close()
+
+	s := New(nil, alwaysLive)
+	s.SetRoutes([]Route{{Domain: "app.localhost", Upstream: backend.Listener.Addr().String(), Auth: "user:"}})
+	fe := frontend(t, s)
+
+	req, _ := http.NewRequest(http.MethodGet, fe.URL+"/", nil)
+	req.Host = "app.localhost"
+	req.SetBasicAuth("user", "")
+	resp, err := fe.Client().Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want 401", resp.StatusCode)
+	}
+}
+
+func TestNormalizeBasicAuth(t *testing.T) {
+	got, err := NormalizeBasicAuth(" admin :p:a:s:s")
+	if err != nil {
+		t.Fatalf("NormalizeBasicAuth: %v", err)
+	}
+	if got != "admin:p:a:s:s" {
+		t.Fatalf("normalized = %q", got)
+	}
+
+	for _, auth := range []string{"admin", ":pass", "user:", "  :pass"} {
+		t.Run(auth, func(t *testing.T) {
+			if _, err := NormalizeBasicAuth(auth); err == nil {
+				t.Fatal("NormalizeBasicAuth succeeded")
+			}
+		})
+	}
+}
+
+func TestValidateRoute(t *testing.T) {
+	valid := Route{Domain: "App.Localhost.", Upstream: "127.0.0.1:4310", Auth: "user:pass"}
+	if err := ValidateRoute(valid); err != nil {
+		t.Fatalf("ValidateRoute valid: %v", err)
+	}
+
+	cases := map[string]Route{
+		"bad domain":   {Domain: "bad domain", Upstream: "127.0.0.1:4310"},
+		"bad host":     {Domain: "app.localhost", Upstream: "example.com:4310"},
+		"bad port":     {Domain: "app.localhost", Upstream: "127.0.0.1:0"},
+		"bad auth":     {Domain: "app.localhost", Upstream: "127.0.0.1:4310", Auth: "user:"},
+		"missing port": {Domain: "app.localhost", Upstream: "127.0.0.1"},
+	}
+	for name, route := range cases {
+		t.Run(name, func(t *testing.T) {
+			if err := ValidateRoute(route); err == nil {
+				t.Fatal("ValidateRoute succeeded")
+			}
+		})
+	}
+}
+
 func TestRemoteAllowed(t *testing.T) {
 	cases := []struct {
 		addr    string

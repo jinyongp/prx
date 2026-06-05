@@ -6,12 +6,16 @@ package daemon
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"gate/internal/proxy"
 )
+
+const maxRoutesBodyBytes = 1 << 20
 
 // Status is the daemon's reported state.
 type Status struct {
@@ -23,6 +27,14 @@ type Status struct {
 	UptimeSec int64  `json:"uptime_sec"`
 	HTTPSAddr string `json:"https_addr,omitempty"`
 	HTTPAddr  string `json:"http_addr,omitempty"`
+}
+
+// RouteStatus is the daemon's redacted route view for CLI status reporting.
+type RouteStatus struct {
+	Domain   string `json:"domain"`
+	Upstream string `json:"upstream"`
+	Exposed  bool   `json:"exposed"`
+	Auth     bool   `json:"auth"`
 }
 
 func adminHandlerWithListen(srv *proxy.Server, started time.Time, httpsAddr, httpAddr string) http.Handler {
@@ -39,9 +51,27 @@ func adminHandlerWithListen(srv *proxy.Server, started time.Time, httpsAddr, htt
 		})
 	})
 
+	mux.HandleFunc("GET /routes", func(w http.ResponseWriter, _ *http.Request) {
+		routes := srv.Routes()
+		statuses := make([]RouteStatus, 0, len(routes))
+		for _, route := range routes {
+			statuses = append(statuses, RouteStatus{
+				Domain:   route.Domain,
+				Upstream: route.Upstream,
+				Exposed:  route.Exposed,
+				Auth:     route.Auth != "",
+			})
+		}
+		writeJSON(w, map[string]any{"routes": statuses})
+	})
+
 	mux.HandleFunc("PUT /routes", func(w http.ResponseWriter, r *http.Request) {
 		var routes []proxy.Route
-		if err := json.NewDecoder(r.Body).Decode(&routes); err != nil {
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxRoutesBodyBytes)).Decode(&routes); err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		if err := validateRoutes(routes); err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
@@ -54,6 +84,25 @@ func adminHandlerWithListen(srv *proxy.Server, started time.Time, httpsAddr, htt
 	})
 
 	return mux
+}
+
+func validateRoutes(routes []proxy.Route) error {
+	seen := map[string]bool{}
+	for _, route := range routes {
+		if err := proxy.ValidateRoute(route); err != nil {
+			return err
+		}
+		domain := canonicalDomain(route.Domain)
+		if seen[domain] {
+			return fmt.Errorf("duplicate route domain %q", domain)
+		}
+		seen[domain] = true
+	}
+	return nil
+}
+
+func canonicalDomain(domain string) string {
+	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
 }
 
 func writeJSON(w http.ResponseWriter, v any) {

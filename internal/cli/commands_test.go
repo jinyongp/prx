@@ -22,6 +22,9 @@ func isolate(t *testing.T) {
 	uitest.ClearColorEnv(t)
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Chdir(t.TempDir())
+	exposeSessionMu.Lock()
+	exposeSessionRoutes = map[string]map[string]exposeSessionRoute{}
+	exposeSessionMu.Unlock()
 }
 
 type fakeDNSProvider struct {

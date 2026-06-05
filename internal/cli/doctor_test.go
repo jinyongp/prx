@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"gate/internal/registry"
 	"gate/internal/ui/uitest"
 )
 
@@ -93,6 +94,164 @@ func TestDoctorMigratesLegacyAdhocRegistry(t *testing.T) {
 	}
 	if !strings.Contains(string(b), `"standalone": true`) {
 		t.Fatalf("standalone field was not added:\n%s", string(b))
+	}
+}
+
+func TestDoctorReportsFutureRegistrySchemaWithoutFixing(t *testing.T) {
+	configDir, _ := isolateDoctor(t)
+	registryPath := filepath.Join(configDir, "registry.json")
+	if err := os.MkdirAll(filepath.Dir(registryPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte(`{
+  "version": 999,
+  "services": {}
+}
+`)
+	if err := os.WriteFile(registryPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Doctor([]string{"--fix", "--json"}, &out, &errb); code != ExitError {
+		t.Fatalf("Doctor exit = %d, stderr=%s", code, errb.String())
+	}
+	var report doctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("json: %v\n%s", err, out.String())
+	}
+	if report.OK || len(report.Issues) != 1 || report.Issues[0].Code != "registry_unsupported_schema" || report.Issues[0].Fixed {
+		t.Fatalf("unexpected report: %+v", report)
+	}
+	got, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("future registry changed:\n%s", got)
+	}
+}
+
+func TestDoctorReportsRegistryIntegrityIssueCodes(t *testing.T) {
+	configDir, _ := isolateDoctor(t)
+	registryPath := filepath.Join(configDir, "registry.json")
+	if err := os.MkdirAll(filepath.Dir(registryPath), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	original := []byte(`{
+  "version": 2,
+  "services": {
+    "wrong/key": {
+      "project": "demo",
+      "service": "web",
+      "domain": "web.localhost",
+      "port": 4312,
+      "adhoc": true
+    },
+    "demo/api": {
+      "project": "demo",
+      "service": "api",
+      "domain": "web.localhost",
+      "port": 4313
+    },
+    "demo/empty": {
+      "project": "demo",
+      "service": "empty",
+      "domain": "",
+      "port": -1
+    }
+  }
+}
+`)
+	if err := os.WriteFile(registryPath, original, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Doctor([]string{"--json"}, &out, &errb); code != ExitError {
+		t.Fatalf("Doctor exit = %d, stderr=%s", code, errb.String())
+	}
+	var report doctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("json: %v\n%s", err, out.String())
+	}
+	codes := map[string]bool{}
+	for _, issue := range report.Issues {
+		codes[issue.Code] = true
+		if issue.Fixed {
+			t.Fatalf("registry integrity issue should not be fixed: %+v", issue)
+		}
+	}
+	for _, code := range []string{"registry_key_mismatch", "registry_duplicate_domain", "registry_empty_domain", "registry_invalid_port"} {
+		if !codes[code] {
+			t.Fatalf("missing code %s in report %+v", code, report)
+		}
+	}
+
+	out.Reset()
+	errb.Reset()
+	if code := Doctor([]string{"--fix", "--json"}, &out, &errb); code != ExitError {
+		t.Fatalf("Doctor --fix exit = %d, stderr=%s", code, errb.String())
+	}
+	report = doctorReport{}
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("json: %v\n%s", err, out.String())
+	}
+	if report.OK {
+		t.Fatalf("doctor --fix should not repair registry integrity issues: %+v", report)
+	}
+	for _, issue := range report.Issues {
+		if issue.Fixed {
+			t.Fatalf("registry integrity issue should remain report-only: %+v", issue)
+		}
+	}
+	got, err := os.ReadFile(registryPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != string(original) {
+		t.Fatalf("doctor --fix rewrote malformed registry:\n%s", got)
+	}
+}
+
+func TestDoctorReportsStaleServiceReservationWithoutRemoving(t *testing.T) {
+	configDir, _ := isolateDoctor(t)
+	projectDir := t.TempDir()
+	configPath := filepath.Join(projectDir, "gate.toml")
+	if err := os.WriteFile(configPath, []byte(`[project]
+name = "demo"
+
+[services.api]
+domain = "api.localhost"
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := registry.Open(filepath.Join(configDir, "registry.json")).Update(func(reg *registry.Registry) error {
+		return reg.Reserve(registry.Reservation{
+			Project: "demo", Service: "web", Domain: "web.localhost", Port: 4400,
+			ConfigPath: configPath, Active: true,
+		})
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	var out, errb bytes.Buffer
+	if code := Doctor([]string{"--fix", "--json"}, &out, &errb); code != ExitError {
+		t.Fatalf("Doctor exit = %d, stderr=%s", code, errb.String())
+	}
+	var report doctorReport
+	if err := json.Unmarshal(out.Bytes(), &report); err != nil {
+		t.Fatalf("json: %v\n%s", err, out.String())
+	}
+	if report.OK || len(report.Issues) != 1 || report.Issues[0].Code != "registry_stale_service" || report.Issues[0].Fixed {
+		t.Fatalf("unexpected report: %+v", report)
+	}
+	reg, err := registry.Open(filepath.Join(configDir, "registry.json")).Read()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := reg.Get(registry.Key("demo", "web")); !ok {
+		t.Fatal("stale reservation was removed")
 	}
 }
 

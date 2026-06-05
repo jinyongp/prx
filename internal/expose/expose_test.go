@@ -2,14 +2,18 @@ package expose
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestForSelectsProvider(t *testing.T) {
@@ -85,6 +89,99 @@ func TestCloudflaredProcessMatchesRequiresTarget(t *testing.T) {
 	}
 	if cloudflaredProcessMatches(record) {
 		t.Fatal("non-cloudflared executable matched")
+	}
+}
+
+func TestCloudflaredExposeSucceedsBeforeTimeout(t *testing.T) {
+	oldCommand := cloudflaredCommand
+	oldTimeout := cloudflaredStartupTimeout
+	t.Cleanup(func() {
+		cloudflaredCommand = oldCommand
+		cloudflaredStartupTimeout = oldTimeout
+	})
+	cloudflaredStartupTimeout = time.Second
+	cloudflaredCommand = func(ctx context.Context, _ string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", "echo https://quick.trycloudflare.com >&2; exec sleep 10")
+	}
+
+	provider := &Cloudflared{}
+	result, err := provider.Expose(context.Background(), "web.localhost", Opts{})
+	if err != nil {
+		t.Fatalf("Expose: %v", err)
+	}
+	if result.URL != "https://quick.trycloudflare.com" || result.PID == 0 {
+		t.Fatalf("result = %+v", result)
+	}
+	if err := provider.Close(); err != nil && !errors.Is(err, os.ErrProcessDone) {
+		t.Fatalf("Close: %v", err)
+	}
+}
+
+func TestCloudflaredExposeTimesOutAndKillsProcess(t *testing.T) {
+	oldCommand := cloudflaredCommand
+	oldTimeout := cloudflaredStartupTimeout
+	t.Cleanup(func() {
+		cloudflaredCommand = oldCommand
+		cloudflaredStartupTimeout = oldTimeout
+	})
+	pidPath := filepath.Join(t.TempDir(), "cloudflared.pid")
+	cloudflaredStartupTimeout = 500 * time.Millisecond
+	cloudflaredCommand = func(ctx context.Context, _ string) *exec.Cmd {
+		script := fmt.Sprintf("echo $$ > %q; echo waiting >&2; exec sleep 60", pidPath)
+		//nolint:gosec // G204: test-controlled shell script used to simulate cloudflared.
+		return exec.CommandContext(ctx, "sh", "-c", script)
+	}
+
+	provider := &Cloudflared{}
+	_, err := provider.Expose(context.Background(), "web.localhost", Opts{})
+	if err == nil || !strings.Contains(err.Error(), "public URL") || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("Expose error = %v", err)
+	}
+	assertCloudflaredCloseReturns(t, provider)
+	b, readErr := os.ReadFile(pidPath)
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	pid, convErr := strconv.Atoi(strings.TrimSpace(string(b)))
+	if convErr != nil {
+		t.Fatal(convErr)
+	}
+	if processExists(pid) {
+		t.Fatalf("cloudflared process %d still exists after timeout", pid)
+	}
+}
+
+func TestCloudflaredExposeReportsNoPublicURL(t *testing.T) {
+	oldCommand := cloudflaredCommand
+	oldTimeout := cloudflaredStartupTimeout
+	t.Cleanup(func() {
+		cloudflaredCommand = oldCommand
+		cloudflaredStartupTimeout = oldTimeout
+	})
+	cloudflaredStartupTimeout = time.Second
+	cloudflaredCommand = func(ctx context.Context, _ string) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", "echo no url >&2")
+	}
+
+	provider := &Cloudflared{}
+	_, err := provider.Expose(context.Background(), "web.localhost", Opts{})
+	if err == nil || !strings.Contains(err.Error(), "did not report a public URL") {
+		t.Fatalf("Expose error = %v", err)
+	}
+	assertCloudflaredCloseReturns(t, provider)
+}
+
+func assertCloudflaredCloseReturns(t *testing.T, provider *Cloudflared) {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- provider.Close() }()
+	select {
+	case err := <-done:
+		if err != nil && !errors.Is(err, os.ErrProcessDone) {
+			t.Fatalf("Close: %v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Close blocked after failed Expose")
 	}
 }
 

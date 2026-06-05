@@ -1,4 +1,5 @@
 .temp
+.cache
 .claude
 .DS_Store
 .taskwarrior

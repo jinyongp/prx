@@ -57,6 +57,9 @@ func Up(args []string, stdout, stderr io.Writer) int {
 
 	var results []upResult
 	var routes []proxy.Route
+	var activated []registry.Reservation
+	var previous []projectReservation
+	var createdKeys []string
 	err = registryStore().Update(func(reg *registry.Registry) error {
 		reg.Prune(configPathExists)
 		used := reg.UsedPorts()
@@ -73,10 +76,17 @@ func Up(args []string, stdout, stderr io.Writer) int {
 				Active: true, ConfigPath: path,
 			}
 			res.SetListenerPair(pair)
+			key := registry.Key(project.Name, name)
+			if prev, ok := reg.Get(key); ok {
+				previous = append(previous, projectReservation{Key: key, Reservation: prev})
+			} else {
+				createdKeys = append(createdKeys, key)
+			}
 			if rerr := reg.Reserve(res); rerr != nil {
 				return rerr
 			}
 			results = append(results, upResult{Service: name, Domain: svc.Domain, Port: p, Allocated: allocated})
+			activated = append(activated, res)
 		}
 		routes = activeRoutesForListener(reg, pair)
 		return nil
@@ -92,12 +102,28 @@ func Up(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, *jsonOut, ExitError, "up_failed", err.Error())
 	}
 
-	if code := ensureDNS(project, *dnsMode, stderr, *jsonOut); code != ExitOK {
-		return code
+	refs := append(listenerRefsForReservations(previous), listenerRefFor(pair))
+	var ensured []registry.Reservation
+	for _, res := range activated {
+		if err := ensureDomainDNS(res.Domain, res.DNS, stderr, *jsonOut); err != nil {
+			rollbackErr := rollbackCurrentProjectUp(previous, createdKeys, ensured, refs, stderr, *jsonOut)
+			if rollbackErr != nil {
+				return fail(stderr, *jsonOut, ExitError, "rollback_failed", "up failed and rollback failed: "+rollbackErr.Error())
+			}
+			if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
+				return fail(stderr, *jsonOut, ExitPerm, "permission", err.Error())
+			}
+			return fail(stderr, *jsonOut, ExitError, "dns_failed", err.Error())
+		}
+		ensured = append(ensured, res)
 	}
 
 	reloaded, actualHTTPSAddr, code := reloadUpRoutes(listenerRefFor(pair), routes, *startDaemon, pair, httpsAddrSet, httpAddrSet, stderr, *jsonOut)
 	if code != ExitOK {
+		rollbackErr := rollbackCurrentProjectUp(previous, createdKeys, ensured, refs, stderr, *jsonOut)
+		if rollbackErr != nil {
+			return fail(stderr, *jsonOut, ExitError, "rollback_failed", "up failed and rollback failed: "+rollbackErr.Error())
+		}
 		return code
 	}
 
@@ -212,6 +238,10 @@ func upExistingScope(sel registryScopeSelection, dnsMode string, startDaemon boo
 	}
 	reloaded, actualHTTPSAddr, code := reloadUpRoutes(listenerRefFor(pair), routes, startDaemon, pair, httpsAddrSet, httpAddrSet, stderr, jsonOut)
 	if code != ExitOK {
+		rollbackErr := rollbackScopedUp(previous, ensured, scope, stderr, jsonOut, listenerRefFor(pair))
+		if rollbackErr != nil {
+			return fail(stderr, jsonOut, ExitError, "rollback_failed", "up failed and rollback failed: "+rollbackErr.Error())
+		}
 		return code
 	}
 	if jsonOut {
@@ -238,10 +268,52 @@ func upExistingScope(sel registryScopeSelection, dnsMode string, startDaemon boo
 	return ExitOK
 }
 
-func rollbackScopedUp(previous []projectReservation, ensured []registry.Reservation, scope daemonScope, stderr io.Writer, jsonOut bool) error {
+func rollbackCurrentProjectUp(previous []projectReservation, createdKeys []string, ensured []registry.Reservation, refs []listenerDaemonRef, stderr io.Writer, jsonOut bool) error {
 	var errs []error
-	if err := restoreReservations(previous, scope, stderr, jsonOut); err != nil {
-		errs = append(errs, err)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		for _, key := range createdKeys {
+			r.Release(key)
+		}
+		for _, item := range previous {
+			if err := r.Reserve(item.Reservation); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		errs = append(errs, fmt.Errorf("restore registry: %w", err))
+	}
+	for i := len(ensured) - 1; i >= 0; i-- {
+		res := ensured[i]
+		if err := removeDomainDNS(res.Domain, res.DNS, stderr, jsonOut); err != nil {
+			errs = append(errs, fmt.Errorf("remove DNS %s: %w", res.Domain, err))
+		}
+	}
+	if err := setListenerRoutesForRefsWithActivity(uniqueListenerRefs(refs), stderr, jsonOut, "restoring routes"); err != nil {
+		errs = append(errs, fmt.Errorf("restore daemon routes: %w", err))
+	}
+	return errors.Join(errs...)
+}
+
+func rollbackScopedUp(previous []projectReservation, ensured []registry.Reservation, scope daemonScope, stderr io.Writer, jsonOut bool, extraRefs ...listenerDaemonRef) error {
+	var errs []error
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		for _, item := range previous {
+			if err := r.Reserve(item.Reservation); err != nil {
+				return err
+			}
+		}
+		return nil
+	}); err != nil {
+		errs = append(errs, fmt.Errorf("restore registry: %w", err))
+	}
+	refs := listenerRefsForReservations(previous)
+	if len(refs) == 0 && scope.Kind != "" {
+		refs = []listenerDaemonRef{defaultListenerRef()}
+	}
+	refs = append(refs, extraRefs...)
+	if err := setListenerRoutesForRefsWithActivity(uniqueListenerRefs(refs), stderr, jsonOut, "restoring routes"); err != nil {
+		errs = append(errs, fmt.Errorf("restore daemon routes: %w", err))
 	}
 	for i := len(ensured) - 1; i >= 0; i-- {
 		res := ensured[i]
@@ -250,6 +322,14 @@ func rollbackScopedUp(previous []projectReservation, ensured []registry.Reservat
 		}
 	}
 	return errors.Join(errs...)
+}
+
+func uniqueListenerRefs(refs []listenerDaemonRef) []listenerDaemonRef {
+	var out []listenerDaemonRef
+	for _, ref := range refs {
+		out = appendListenerRef(out, ref)
+	}
+	return out
 }
 
 func reloadUpRoutes(ref listenerDaemonRef, routes []proxy.Route, startDaemon bool, pair listener.Pair, httpsAddrSet, httpAddrSet bool, stderr io.Writer, jsonOut bool) (bool, string, int) {
@@ -460,19 +540,6 @@ func resolvePort(reg *registry.Registry, project, name string, svc config.Servic
 	}
 	p, err := port.Allocate(port.DefaultPool, used)
 	return p, true, err
-}
-
-func ensureDNS(project *config.Project, mode string, stderr io.Writer, jsonOut bool) int {
-	for _, name := range sortedServices(project) {
-		domain := project.Services[name].Domain
-		if err := ensureDomainDNS(domain, mode, stderr, jsonOut); err != nil {
-			if os.IsPermission(err) || errors.Is(err, os.ErrPermission) {
-				return fail(stderr, jsonOut, ExitPerm, "permission", err.Error())
-			}
-			return fail(stderr, jsonOut, ExitError, "dns_failed", err.Error())
-		}
-	}
-	return ExitOK
 }
 
 func activeRoutesForListener(reg *registry.Registry, pair listener.Pair) []proxy.Route {

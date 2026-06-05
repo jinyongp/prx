@@ -6,6 +6,7 @@ package registry
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -60,6 +61,45 @@ type Registry struct {
 	Services map[string]Reservation `json:"services"`
 }
 
+// UnsupportedSchemaError means the registry was written by a newer gate
+// version. Older binaries must not rewrite it.
+type UnsupportedSchemaError struct {
+	Version   int
+	Supported int
+}
+
+func (e *UnsupportedSchemaError) Error() string {
+	return fmt.Sprintf("registry schema version %d is newer than supported version %d", e.Version, e.Supported)
+}
+
+// IntegrityIssue describes a malformed registry reservation discovered at the
+// storage boundary.
+type IntegrityIssue struct {
+	Code    string
+	Key     string
+	Message string
+}
+
+// IntegrityError reports one or more registry invariant violations.
+type IntegrityError struct {
+	Issues []IntegrityIssue
+}
+
+func (e *IntegrityError) Error() string {
+	if len(e.Issues) == 0 {
+		return "registry integrity error"
+	}
+	return e.Issues[0].Message
+}
+
+func (e *IntegrityError) Is(target error) bool {
+	_, ok := target.(*IntegrityError)
+	return ok
+}
+
+// ErrIntegrity is a sentinel for errors.Is checks.
+var ErrIntegrity = &IntegrityError{}
+
 // Key is the registry map key for a (project, service) pair.
 func Key(project, service string) string {
 	return project + "/" + service
@@ -89,6 +129,15 @@ func (e *ConflictError) Error() string {
 func (r *Registry) Reserve(res Reservation) error {
 	res.Domain = canonicalDomain(res.Domain)
 	res.SetListenerPair(res.ListenerPair())
+	if strings.TrimSpace(res.Service) == "" {
+		return errors.New("service must not be empty")
+	}
+	if res.Domain == "" {
+		return errors.New("domain must not be empty")
+	}
+	if res.Port < 0 || res.Port > 65535 {
+		return fmt.Errorf("port %d is outside valid range", res.Port)
+	}
 	self := Key(res.Project, res.Service)
 	for key, ex := range r.Services {
 		if key == self {
@@ -189,6 +238,67 @@ func (r *Registry) Keys() []string {
 	}
 	sort.Strings(keys)
 	return keys
+}
+
+// Validate checks invariants that must hold for a persisted registry snapshot.
+func (r *Registry) Validate() []IntegrityIssue {
+	if r.Services == nil {
+		return nil
+	}
+	var issues []IntegrityIssue
+	domains := map[string]string{}
+	ports := map[int]string{}
+	for key, res := range r.Services {
+		expected := Key(res.Project, res.Service)
+		if key != expected {
+			issues = append(issues, IntegrityIssue{
+				Code:    "registry_key_mismatch",
+				Key:     key,
+				Message: fmt.Sprintf("registry key %q does not match reservation owner %q", key, expected),
+			})
+		}
+		if strings.TrimSpace(res.Service) == "" {
+			issues = append(issues, IntegrityIssue{
+				Code:    "registry_empty_service",
+				Key:     key,
+				Message: fmt.Sprintf("registry reservation %q has an empty service", key),
+			})
+		}
+		domain := canonicalDomain(res.Domain)
+		if domain == "" {
+			issues = append(issues, IntegrityIssue{
+				Code:    "registry_empty_domain",
+				Key:     key,
+				Message: fmt.Sprintf("registry reservation %q has an empty domain", key),
+			})
+		} else if owner, ok := domains[domain]; ok && owner != key {
+			issues = append(issues, IntegrityIssue{
+				Code:    "registry_duplicate_domain",
+				Key:     key,
+				Message: fmt.Sprintf("registry domain %q is duplicated by %s and %s", domain, owner, key),
+			})
+		} else {
+			domains[domain] = key
+		}
+		if res.Port < 0 || res.Port > 65535 {
+			issues = append(issues, IntegrityIssue{
+				Code:    "registry_invalid_port",
+				Key:     key,
+				Message: fmt.Sprintf("registry reservation %q has invalid port %d", key, res.Port),
+			})
+		} else if res.Port != 0 {
+			if owner, ok := ports[res.Port]; ok && owner != key {
+				issues = append(issues, IntegrityIssue{
+					Code:    "registry_duplicate_port",
+					Key:     key,
+					Message: fmt.Sprintf("registry port %d is duplicated by %s and %s", res.Port, owner, key),
+				})
+			} else {
+				ports[res.Port] = key
+			}
+		}
+	}
+	return issues
 }
 
 // migrate upgrades an older registry to the current schema in place.

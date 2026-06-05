@@ -23,7 +23,6 @@ const Filename = "gate.toml"
 // TLS modes.
 const (
 	TLSInternal = "internal"
-	TLSACME     = "acme"
 )
 
 // ErrNotFound is returned by Discover when no gate.toml is found within bounds.
@@ -33,7 +32,7 @@ var ErrNotFound = errors.New("gate.toml not found")
 type Service struct {
 	Domain  string `toml:"domain"`
 	Port    int    `toml:"port,omitempty"` // 0 = auto-allocate
-	TLS     string `toml:"tls,omitempty"`  // internal (default) | acme
+	TLS     string `toml:"tls,omitempty"`  // internal only; omitted defaults to internal
 	ACMEDNS string `toml:"acme_dns,omitempty"`
 }
 
@@ -327,12 +326,11 @@ func (p *Project) Validate() error {
 		if err := ValidateDomain(svc.Domain); err != nil {
 			return fmt.Errorf("service %q: %w", name, err)
 		}
+		if svc.ACMEDNS != "" {
+			return fmt.Errorf("service %q: acme_dns is not supported", name)
+		}
 		switch svc.TLS {
 		case TLSInternal:
-		case TLSACME:
-			if svc.ACMEDNS == "" {
-				return fmt.Errorf("service %q: tls=acme requires acme_dns", name)
-			}
 		default:
 			return fmt.Errorf("service %q: invalid tls %q", name, svc.TLS)
 		}

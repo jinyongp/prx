@@ -261,6 +261,8 @@ func flagDisplayRank(names string) int {
 		return 50
 	case "auth":
 		return 60
+	case "no-auth":
+		return 65
 	case "force":
 		return 70
 	case "fix":
