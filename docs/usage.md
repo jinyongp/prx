@@ -683,10 +683,12 @@ If the running `gate` binary is Homebrew-managed, `gate upgrade` uses
 `brew upgrade gate`; otherwise it runs the standalone installer.
 During installation gate shows a single status indicator and hides installer
 logs unless the install command fails.
-After a successful upgrade or up-to-date check, gate automatically runs
-`doctor`. Any remaining issues are reported in the upgrade output with the
-matching `gate doctor --fix` repair hint, but they do not turn a successful
-upgrade into an upgrade failure.
+After a successful upgrade, gate restarts any daemons that were running before
+the upgrade and automatically runs `doctor`. Any remaining issues are reported
+in the upgrade output with the matching `gate doctor --fix` repair hint, but
+they do not turn a successful upgrade into an upgrade failure. If gate is
+already up to date, it prints the up-to-date status and exits without restarting
+daemons or running `doctor`.
 
 Skip confirmation:
 

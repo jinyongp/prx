@@ -331,30 +331,33 @@ func TestRunUpgradeCommandReportsCapturedOutputOnFailure(t *testing.T) {
 	}
 }
 
-func TestCompleteUpToDateRefreshesRunningDaemon(t *testing.T) {
-	stubDoctorAfterUpgrade(t, doctorReport{OK: true})
+func TestCompleteUpToDateSkipsRestartAndDoctor(t *testing.T) {
 	oldRestart := restartDaemonAfterUpgradeFunc
-	t.Cleanup(func() { restartDaemonAfterUpgradeFunc = oldRestart })
+	oldDoctor := doctorAfterUpgradeFunc
+	t.Cleanup(func() {
+		restartDaemonAfterUpgradeFunc = oldRestart
+		doctorAfterUpgradeFunc = oldDoctor
+	})
 
-	restarted := false
-	restartDaemonAfterUpgradeFunc = func(st daemon.Status, _ io.Writer, _ io.Writer) int {
-		restarted = true
-		if st.PID != 456 {
-			t.Fatalf("restart status = %+v", st)
-		}
-		return ExitOK
+	restartDaemonAfterUpgradeFunc = func(daemon.Status, io.Writer, io.Writer) int {
+		t.Fatal("restart should not be called when already up to date")
+		return ExitError
+	}
+	doctorAfterUpgradeFunc = func() doctorReport {
+		t.Fatal("doctor should not run when already up to date")
+		return doctorReport{}
 	}
 
 	var out, errb bytes.Buffer
-	code := completeUpToDate(&out, &errb, "v1.2.3", []daemon.Status{{PID: 456}})
+	code := completeUpToDate(&out, "v1.2.3")
 	if code != ExitOK {
 		t.Fatalf("completeUpToDate exit = %d, stderr=%s", code, errb.String())
 	}
-	if !restarted {
-		t.Fatal("restart was not called")
-	}
 	if !strings.Contains(out.String(), "up to date (v1.2.3)") {
 		t.Fatalf("stdout missing up-to-date status: %q", out.String())
+	}
+	if strings.Contains(out.String(), "doctor") {
+		t.Fatalf("stdout should not include doctor output: %q", out.String())
 	}
 }
 

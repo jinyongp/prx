@@ -77,8 +77,7 @@ func Upgrade(args []string, stdout, stderr io.Writer) int {
 	if latestTag != "" {
 		if current := normalizedVersion(currentVersion); current != "" && current != "dev" {
 			if normalizedVersion(latestTag) == current {
-				daemonsBefore := daemonStatusesBeforeUpgrade()
-				return completeUpToDate(stdout, stderr, currentVersion, daemonsBefore)
+				return completeUpToDate(stdout, currentVersion)
 			}
 		}
 	} else {
@@ -270,18 +269,8 @@ func completeUpgrade(stdout, stderr io.Writer, daemonsBefore []daemon.Status) in
 	return ExitOK
 }
 
-func completeUpToDate(stdout, stderr io.Writer, version string, daemonsBefore []daemon.Status) int {
-	code := ExitOK
-	for _, st := range daemonsBefore {
-		if nextCode := restartDaemonAfterUpgradeFunc(st, stdout, stderr); nextCode != ExitOK && code == ExitOK {
-			code = nextCode
-		}
-	}
-	if code != ExitOK {
-		return code
-	}
+func completeUpToDate(stdout io.Writer, version string) int {
 	printUpgradeStatus(stdout, fmt.Sprintf("up to date (%s)", version))
-	printDoctorAfterUpgrade(stdout)
 	return ExitOK
 }
 
