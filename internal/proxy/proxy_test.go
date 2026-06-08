@@ -128,6 +128,34 @@ func TestCanonicalHostAndForwardedHeaders(t *testing.T) {
 	}
 }
 
+func TestRouteForwardHostOverridesUpstreamHost(t *testing.T) {
+	var gotHost, gotForwardedHost string
+	backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotHost = r.Host
+		gotForwardedHost = r.Header.Get("X-Forwarded-Host")
+		_, _ = io.WriteString(w, "ok")
+	}))
+	defer backend.Close()
+
+	s := New(nil, alwaysLive)
+	s.SetRoutes([]Route{{
+		Domain:      "anubis.tail6c50d7.ts.net",
+		Upstream:    backend.Listener.Addr().String(),
+		ForwardHost: "local.stamp.is",
+	}})
+	resp := get(t, frontend(t, s), "anubis.tail6c50d7.ts.net", "/")
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	if gotHost != "local.stamp.is" {
+		t.Fatalf("Host = %q", gotHost)
+	}
+	if gotForwardedHost != "anubis.tail6c50d7.ts.net" {
+		t.Fatalf("X-Forwarded-Host = %q", gotForwardedHost)
+	}
+}
+
 func TestUnknownHostIs404(t *testing.T) {
 	s := New(nil, alwaysLive)
 	resp := get(t, frontend(t, s), "ghost.localhost", "/")

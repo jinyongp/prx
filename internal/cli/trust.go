@@ -6,8 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"text/tabwriter"
 
@@ -209,7 +211,8 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 		if externalExposureProvider(providerName) {
 			applyExposeSession(ref.String(), routes, res.Domain, routeAuth)
 		}
-		if err := applyExposureRecords(ref.String(), routes); err != nil {
+		routes, err = applyExposureRecords(ref.String(), routes)
+		if err != nil {
 			cleanupExposureProvider(provider, record)
 			if rollbackErr := removeExposureRecordFromStore(record); rollbackErr != nil {
 				return fail(stderr, *jsonOut, ExitError, "rollback_failed", "expose failed and rollback failed: "+rollbackErr.Error())
@@ -509,16 +512,15 @@ func exposureRecordMatchesScope(record expose.Record, sel registryScopeSelection
 	return record.Scope == daemonScopeGlobal && record.Project == ""
 }
 
-func applyExposureRecords(key string, routes []proxy.Route) error {
+func applyExposureRecords(key string, routes []proxy.Route) ([]proxy.Route, error) {
 	records, err := exposureStore().Read()
 	if err != nil {
-		return err
+		return nil, err
 	}
-	applyExposureRecordSet(key, routes, records)
-	return nil
+	return applyExposureRecordSet(key, routes, records), nil
 }
 
-func applyExposureRecordSet(key string, routes []proxy.Route, records []expose.Record) {
+func applyExposureRecordSet(key string, routes []proxy.Route, records []expose.Record) []proxy.Route {
 	exposeSessionMu.Lock()
 	defer exposeSessionMu.Unlock()
 	sessions := exposeSessionRoutes[key]
@@ -538,8 +540,10 @@ func applyExposureRecordSet(key string, routes []proxy.Route, records []expose.R
 				continue
 			}
 			routes[i].Exposed = true
+			routes = upsertExposureAlias(routes, routes[i], record)
 		}
 	}
+	return routes
 }
 
 func reloadExposureRecordsWith(records []expose.Record, stderr io.Writer, jsonOut bool) error {
@@ -556,7 +560,7 @@ func reloadExposureRecordsWith(records []expose.Record, stderr io.Writer, jsonOu
 			continue
 		}
 		routes := activeRoutesForListener(reg, ref.Pair)
-		applyExposureRecordSet(ref.String(), routes, records)
+		routes = applyExposureRecordSet(ref.String(), routes, records)
 		activity := startActivity(stderr, jsonOut, "reloading routes")
 		err := setListenerRoutesFunc(ref, routes)
 		if err != nil {
@@ -566,6 +570,35 @@ func reloadExposureRecordsWith(records []expose.Record, stderr io.Writer, jsonOu
 		activity.Complete()
 	}
 	return nil
+}
+
+func upsertExposureAlias(routes []proxy.Route, base proxy.Route, record expose.Record) []proxy.Route {
+	alias := exposurePublicHost(record)
+	if alias == "" || alias == base.Domain {
+		return routes
+	}
+	base.Domain = alias
+	base.Exposed = true
+	base.ForwardHost = record.Target
+	for i := range routes {
+		if routes[i].Domain == alias {
+			routes[i] = base
+			return routes
+		}
+	}
+	return append(routes, base)
+}
+
+func exposurePublicHost(record expose.Record) string {
+	u, err := url.Parse(record.PublicURL)
+	if err != nil {
+		return ""
+	}
+	host := strings.TrimSuffix(strings.ToLower(u.Hostname()), ".")
+	if host == "" || host == strings.TrimSuffix(strings.ToLower(record.Target), ".") {
+		return ""
+	}
+	return host
 }
 
 func removeExposureRecord(records []expose.Record, match expose.Record) []expose.Record {

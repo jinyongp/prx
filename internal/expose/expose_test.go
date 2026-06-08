@@ -165,10 +165,63 @@ func TestCloudflaredExposeReportsNoPublicURL(t *testing.T) {
 
 	provider := &Cloudflared{}
 	_, err := provider.Expose(context.Background(), "web.localhost", Opts{})
-	if err == nil || !strings.Contains(err.Error(), "did not report a public URL") {
+	if err == nil || !strings.Contains(err.Error(), "public URL") {
 		t.Fatalf("Expose error = %v", err)
 	}
 	assertCloudflaredCloseReturns(t, provider)
+}
+
+func TestTailscaleExposeUsesNodeURLAndOriginTarget(t *testing.T) {
+	oldStatusCommand := tailscaleStatusCommand
+	oldServeCommand := tailscaleServeCommand
+	t.Cleanup(func() {
+		tailscaleStatusCommand = oldStatusCommand
+		tailscaleServeCommand = oldServeCommand
+	})
+	tailscaleStatusCommand = func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", `printf '{"Self":{"DNSName":"anubis.tail6c50d7.ts.net."}}'`)
+	}
+	var gotTarget string
+	tailscaleServeCommand = func(ctx context.Context, target string) *exec.Cmd {
+		gotTarget = target
+		return exec.CommandContext(ctx, "sh", "-c", "true")
+	}
+
+	result, err := Tailscale{}.Expose(context.Background(), "local.stamp.is", Opts{})
+	if err != nil {
+		t.Fatalf("Expose: %v", err)
+	}
+	if result.URL != "https://anubis.tail6c50d7.ts.net" {
+		t.Fatalf("URL = %q", result.URL)
+	}
+	if gotTarget != "https://local.stamp.is" {
+		t.Fatalf("target = %q", gotTarget)
+	}
+}
+
+func TestTailscaleExposeFailsBeforeServeWhenNodeURLMissing(t *testing.T) {
+	oldStatusCommand := tailscaleStatusCommand
+	oldServeCommand := tailscaleServeCommand
+	t.Cleanup(func() {
+		tailscaleStatusCommand = oldStatusCommand
+		tailscaleServeCommand = oldServeCommand
+	})
+	tailscaleStatusCommand = func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "sh", "-c", `printf '{"Self":{}}'`)
+	}
+	serveCalled := false
+	tailscaleServeCommand = func(ctx context.Context, target string) *exec.Cmd {
+		serveCalled = true
+		return exec.CommandContext(ctx, "sh", "-c", "true")
+	}
+
+	_, err := Tailscale{}.Expose(context.Background(), "local.stamp.is", Opts{})
+	if err == nil || !strings.Contains(err.Error(), "DNS name") {
+		t.Fatalf("Expose error = %v", err)
+	}
+	if serveCalled {
+		t.Fatal("serve command called before node URL was known")
+	}
 }
 
 func assertCloudflaredCloseReturns(t *testing.T, provider *Cloudflared) {

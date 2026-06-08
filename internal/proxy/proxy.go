@@ -21,10 +21,11 @@ import (
 
 // Route maps an incoming host to a local upstream.
 type Route struct {
-	Domain   string `json:"domain"`
-	Upstream string `json:"upstream"`       // host:port, e.g. 127.0.0.1:4310
-	Exposed  bool   `json:"exposed"`        // if false, non-loopback clients are refused
-	Auth     string `json:"auth,omitempty"` // optional "user:pass"; enforced before proxying
+	Domain      string `json:"domain"`
+	Upstream    string `json:"upstream"`               // host:port, e.g. 127.0.0.1:4310
+	Exposed     bool   `json:"exposed"`                // if false, non-loopback clients are refused
+	Auth        string `json:"auth,omitempty"`         // optional "user:pass"; enforced before proxying
+	ForwardHost string `json:"forward_host,omitempty"` // optional Host override for provider URL aliases
 }
 
 // LiveFunc reports whether an upstream (host:port) is accepting connections.
@@ -41,7 +42,10 @@ type Server struct {
 
 type ctxKey int
 
-const upstreamKey ctxKey = iota
+const (
+	upstreamKey ctxKey = iota
+	routeKey
+)
 
 // New returns a Server. getCert supplies leaf certificates by SNI; live (if nil)
 // defaults to a short TCP dial used to classify upstream proxy failures.
@@ -56,7 +60,12 @@ func New(getCert func(*tls.ClientHelloInfo) (*tls.Certificate, error), live Live
 			target, _ := pr.In.Context().Value(upstreamKey).(*url.URL)
 			pr.SetURL(target)
 			pr.SetXForwarded()
-			pr.Out.Host = pr.In.Host
+			route, _ := pr.In.Context().Value(routeKey).(*Route)
+			if route != nil && route.ForwardHost != "" {
+				pr.Out.Host = route.ForwardHost
+			} else {
+				pr.Out.Host = pr.In.Host
+			}
 		},
 		FlushInterval: -1, // flush immediately for SSE/streaming
 		ErrorHandler: func(w http.ResponseWriter, r *http.Request, _ error) {
@@ -141,6 +150,7 @@ func (s *Server) HTTPSHandler() http.Handler {
 		}
 		target := &url.URL{Scheme: "http", Host: route.Upstream}
 		ctx := context.WithValue(r.Context(), upstreamKey, target)
+		ctx = context.WithValue(ctx, routeKey, route)
 		s.rp.ServeHTTP(w, r.WithContext(ctx))
 	})
 }

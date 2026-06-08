@@ -1,11 +1,10 @@
 package expose
 
 import (
-	"bufio"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -32,19 +31,36 @@ var (
 		//nolint:gosec // G204: fixed binary; domain comes from the project config.
 		return exec.CommandContext(ctx, "cloudflared", "tunnel", "--url", "https://"+domain)
 	}
+	tailscaleStatusCommand = func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "tailscale", "status", "--json")
+	}
+	tailscaleServeCommand = func(ctx context.Context, target string) *exec.Cmd {
+		//nolint:gosec // G204: fixed binary; target comes from the project config.
+		return exec.CommandContext(ctx, "tailscale", "serve", "--bg", target)
+	}
 )
 
 // Expose starts a quick tunnel to the local HTTPS address for domain and
 // returns the public URL cloudflared prints.
 func (c *Cloudflared) Expose(ctx context.Context, domain string, _ Opts) (Result, error) {
 	cmd := cloudflaredCommand(ctx, domain)
-	stderr, err := cmd.StderrPipe()
+	logFile, err := os.CreateTemp("", "gate-cloudflared-*.log")
 	if err != nil {
 		return Result{}, err
 	}
+	logPath := logFile.Name()
+	cmd.Stdout = logFile
+	cmd.Stderr = logFile
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := cmd.Start(); err != nil {
+		_ = logFile.Close()
+		_ = os.Remove(logPath)
+		if errors.Is(err, exec.ErrNotFound) {
+			return Result{}, fmt.Errorf("expose: cloudflared not found in PATH; install cloudflared and retry")
+		}
 		return Result{}, fmt.Errorf("expose: cloudflared not available: %w", err)
 	}
+	_ = logFile.Close()
 	waitc := make(chan error, 1)
 	go func() { waitc <- cmd.Wait() }()
 	c.mu.Lock()
@@ -52,51 +68,55 @@ func (c *Cloudflared) Expose(ctx context.Context, domain string, _ Opts) (Result
 	c.waitc = waitc
 	c.mu.Unlock()
 
-	urlc := make(chan cloudflaredURLResult, 1)
-	go scanCloudflaredURL(stderr, urlc)
-	timer := time.NewTimer(cloudflaredStartupTimeout)
+	url, waitConsumed, err := waitForCloudflaredURL(ctx, logPath, waitc, cloudflaredStartupTimeout)
+	if err != nil {
+		if waitConsumed {
+			c.clear(cmd)
+		} else {
+			_ = c.killAndClear(cmd, waitc)
+		}
+		return Result{}, err
+	}
+	return Result{URL: url, PID: cmd.Process.Pid, Command: strings.Join(cmd.Args, " ")}, nil
+}
+
+func waitForCloudflaredURL(ctx context.Context, logPath string, waitc <-chan error, timeout time.Duration) (string, bool, error) {
+	timer := time.NewTimer(timeout)
 	defer timer.Stop()
-
-	select {
-	case got := <-urlc:
-		if got.err != nil {
-			_ = c.killAndClear(cmd, waitc)
-			return Result{}, got.err
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		if url := cloudflaredURLFromLog(logPath); url != "" {
+			return url, false, nil
 		}
-		if got.url == "" {
-			_ = c.killAndClear(cmd, waitc)
-			return Result{}, fmt.Errorf("expose: cloudflared did not report a public URL")
-		}
-		return Result{URL: got.url, PID: cmd.Process.Pid, Command: strings.Join(cmd.Args, " ")}, nil
-	case <-timer.C:
-		_ = c.killAndClear(cmd, waitc)
-		return Result{}, fmt.Errorf("expose: cloudflared did not report a public URL before startup timeout")
-	case <-ctx.Done():
-		_ = c.killAndClear(cmd, waitc)
-		return Result{}, ctx.Err()
-	}
-}
-
-type cloudflaredURLResult struct {
-	url string
-	err error
-}
-
-func scanCloudflaredURL(stderr io.Reader, out chan<- cloudflaredURLResult) {
-	scanner := bufio.NewScanner(stderr)
-	for scanner.Scan() {
-		if url := trycloudflareRe.FindString(scanner.Text()); url != "" {
-			out <- cloudflaredURLResult{url: url}
-			for scanner.Scan() {
+		select {
+		case <-ticker.C:
+		case <-timer.C:
+			return "", false, fmt.Errorf("expose: cloudflared did not report a public URL before startup timeout; log: %s", logPath)
+		case <-ctx.Done():
+			return "", false, ctx.Err()
+		case err := <-waitc:
+			if url := cloudflaredURLFromLog(logPath); url != "" {
+				return "", true, cloudflaredExitError(fmt.Sprintf("expose: cloudflared exited after reporting %s", url), err, logPath)
 			}
-			return
+			return "", true, cloudflaredExitError("expose: cloudflared exited before reporting a public URL", err, logPath)
 		}
 	}
-	if err := scanner.Err(); err != nil && !errors.Is(err, os.ErrClosed) {
-		out <- cloudflaredURLResult{err: fmt.Errorf("expose: cloudflared stderr: %w", err)}
-		return
+}
+
+func cloudflaredExitError(prefix string, err error, logPath string) error {
+	if err != nil {
+		return fmt.Errorf("%s: %w; log: %s", prefix, err, logPath)
 	}
-	out <- cloudflaredURLResult{}
+	return fmt.Errorf("%s; log: %s", prefix, logPath)
+}
+
+func cloudflaredURLFromLog(logPath string) string {
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		return ""
+	}
+	return trycloudflareRe.FindString(string(b))
 }
 
 func killAndWait(cmd *exec.Cmd, waitc <-chan error) error {
@@ -110,13 +130,17 @@ func killAndWait(cmd *exec.Cmd, waitc <-chan error) error {
 }
 
 func (c *Cloudflared) killAndClear(cmd *exec.Cmd, waitc <-chan error) error {
+	c.clear(cmd)
+	return killAndWait(cmd, waitc)
+}
+
+func (c *Cloudflared) clear(cmd *exec.Cmd) {
 	c.mu.Lock()
 	if c.cmd == cmd {
 		c.cmd = nil
 		c.waitc = nil
 	}
 	c.mu.Unlock()
-	return killAndWait(cmd, waitc)
 }
 
 func (c *Cloudflared) Status(_ context.Context, record Record) (string, error) {
@@ -161,12 +185,40 @@ type Tailscale struct{}
 
 // Expose publishes the local HTTPS address through tailscale serve.
 func (Tailscale) Expose(ctx context.Context, domain string, _ Opts) (Result, error) {
-	//nolint:gosec // G204: fixed binary; domain comes from the project config.
-	cmd := exec.CommandContext(ctx, "tailscale", "serve", "--bg", "https://"+domain)
+	publicURL, err := tailscaleNodeURL(ctx)
+	if err != nil {
+		return Result{}, err
+	}
+	target := "https://" + domain
+	cmd := tailscaleServeCommand(ctx, target)
 	if out, err := cmd.CombinedOutput(); err != nil {
 		return Result{}, fmt.Errorf("expose: tailscale serve failed: %w: %s", err, out)
 	}
-	return Result{URL: "https://" + domain}, nil
+	return Result{URL: publicURL, Command: strings.Join(cmd.Args, " ")}, nil
+}
+
+func tailscaleNodeURL(ctx context.Context) (string, error) {
+	cmd := tailscaleStatusCommand(ctx)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return "", fmt.Errorf("expose: tailscale not found in PATH; install tailscale and retry")
+		}
+		return "", fmt.Errorf("expose: tailscale status failed: %w: %s", err, out)
+	}
+	var status struct {
+		Self struct {
+			DNSName string `json:"DNSName"`
+		} `json:"Self"`
+	}
+	if err := json.Unmarshal(out, &status); err != nil {
+		return "", fmt.Errorf("expose: tailscale status returned invalid JSON: %w", err)
+	}
+	dnsName := strings.TrimSuffix(strings.TrimSpace(status.Self.DNSName), ".")
+	if dnsName == "" {
+		return "", fmt.Errorf("expose: tailscale status did not report this machine's DNS name")
+	}
+	return "https://" + dnsName, nil
 }
 
 func (Tailscale) Status(context.Context, Record) (string, error) {

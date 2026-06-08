@@ -507,6 +507,7 @@ and available in `PATH`.
 Prerequisites:
 
 - Install [`cloudflared`](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/).
+- Make sure `cloudflared` is available in `PATH`.
 - Allow outbound internet access from the development machine.
 - Start gate routes first with `gate up -d`.
 - Start the dev server, usually with `gate run <service> -- ...`.
@@ -595,9 +596,26 @@ Limitations:
 gate expose web --via tailscale
 ```
 
-This runs `tailscale serve --bg https://<service-domain>`. `gate expose stop`
-reports Tailscale records as `unverified`; tear them down with Tailscale's serve
-controls, then pass `--force` to forget the local record if needed:
+This runs `tailscale serve --bg https://<service-domain>` and prints the
+Tailscale Serve URL for the current machine:
+
+```text
+web exposed via tailscale
+  https://my-mac.tail6c50d7.ts.net -> local.stamp.is
+```
+
+Open the Tailscale URL from another device in the same tailnet:
+
+```text
+https://my-mac.tail6c50d7.ts.net
+```
+
+gate also reloads a route alias for the Tailscale URL host so host-routed
+services continue to resolve to the exposed service.
+
+`gate expose stop` reports Tailscale records as `unverified`; tear them down
+with Tailscale's serve controls, then pass `--force` to forget the local record
+if needed:
 
 ```bash
 tailscale serve reset

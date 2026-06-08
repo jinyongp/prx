@@ -769,7 +769,8 @@ func setListenerRoutesForRef(ref listenerDaemonRef) error {
 		return err
 	}
 	routes := activeRoutesForListener(reg, ref.Pair)
-	if err := applyExposureRecords(ref.String(), routes); err != nil {
+	routes, err = applyExposureRecords(ref.String(), routes)
+	if err != nil {
 		return err
 	}
 	return setListenerRoutesFunc(ref, routes)

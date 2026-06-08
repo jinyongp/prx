@@ -411,6 +411,62 @@ func TestExposePreservesExistingSessionRoutesInScope(t *testing.T) {
 	}
 }
 
+func TestExposeAddsPublicURLHostAlias(t *testing.T) {
+	isolate(t)
+	shortConfigDir, err := os.MkdirTemp("/tmp", "gate-cli-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(shortConfigDir) })
+	t.Setenv("XDG_CONFIG_HOME", shortConfigDir)
+	t.Setenv("XDG_STATE_HOME", shortConfigDir)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "local.stamp.is", Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv := proxy.New(nil, nil)
+	stopListener, err := daemon.ServeAdmin(context.Background(), defaultListenerRef().socketPath(), srv)
+	if err != nil {
+		t.Fatalf("ServeAdmin listener: %v", err)
+	}
+	defer stopListener()
+
+	oldSetRoutes := setListenerRoutesFunc
+	t.Cleanup(func() { setListenerRoutesFunc = oldSetRoutes })
+	var final []proxy.Route
+	setListenerRoutesFunc = func(scope listenerDaemonRef, routes []proxy.Route) error {
+		if scope.String() != defaultListenerRef().String() {
+			t.Fatalf("scope = %s", scope.String())
+		}
+		final = append([]proxy.Route{}, routes...)
+		return oldSetRoutes(scope, routes)
+	}
+
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		return fakeExposeProvider{result: expose.Result{URL: "https://anubis.tail6c50d7.ts.net"}}, nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"-g", "web", "--via", "tailscale", "--auth", "user:pass"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Expose exit = %d, stderr=%s", code, errb.String())
+	}
+	if !routeExposed(final, "local.stamp.is", "user:pass") {
+		t.Fatalf("base route not exposed: %+v", final)
+	}
+	if !routeExposed(final, "anubis.tail6c50d7.ts.net", "user:pass") {
+		t.Fatalf("public host alias not exposed: %+v", final)
+	}
+	if !routeForwardHost(final, "anubis.tail6c50d7.ts.net", "local.stamp.is") {
+		t.Fatalf("public host alias missing forward host: %+v", final)
+	}
+	if !strings.Contains(out.String(), "https://anubis.tail6c50d7.ts.net") || !strings.Contains(out.String(), "local.stamp.is") {
+		t.Fatalf("stdout = %s", out.String())
+	}
+}
+
 func TestExposeLsAndStop(t *testing.T) {
 	isolate(t)
 	shortConfigDir, err := os.MkdirTemp("/tmp", "gate-cli-")
@@ -776,6 +832,15 @@ func TestExposeStopTailscaleRequiresForce(t *testing.T) {
 func routeExposed(routes []proxy.Route, domain, auth string) bool {
 	for _, route := range routes {
 		if route.Domain == domain && route.Exposed && route.Auth == auth {
+			return true
+		}
+	}
+	return false
+}
+
+func routeForwardHost(routes []proxy.Route, domain, forwardHost string) bool {
+	for _, route := range routes {
+		if route.Domain == domain && route.ForwardHost == forwardHost {
 			return true
 		}
 	}
