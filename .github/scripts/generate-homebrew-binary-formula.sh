@@ -27,7 +27,26 @@ release_url="https://github.com/${repo}/releases/download/${version_tag}"
 checksums="$(mktemp)"
 trap 'rm -f "$checksums"' EXIT
 
-curl -fsSL "${release_url}/checksums.txt" -o "$checksums"
+download() {
+  local url="$1"
+  local out="$2"
+  local attempt
+  local delay=1
+  for attempt in 1 2 3 4 5; do
+    if curl -fsSL "$url" -o "$out"; then
+      return 0
+    fi
+    if [ "$attempt" -eq 5 ]; then
+      break
+    fi
+    printf 'retrying download in %ss: %s\n' "$delay" "$url" >&2
+    sleep "$delay"
+    delay=$((delay * 2))
+  done
+  return 1
+}
+
+download "${release_url}/checksums.txt" "$checksums"
 
 checksum_for() {
   local asset="$1"
