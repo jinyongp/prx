@@ -149,6 +149,9 @@ Run this inside your app repository.
 
 `.localhost` domains need no DNS setup. Custom domains need `/etc/hosts` or
 another local DNS setup, so `gate up` may ask for administrator approval.
+For LAN access, `gate expose <service> --via lan` derives a `.local` alias from
+the service domain: `.local` stays unchanged, `.localhost` becomes `.local`, and
+other domains append `.local`.
 
 Gate daemons are keyed by listener address, not by project. The default listener
 owns HTTPS `:443` and HTTP `:80`, so project and global reservations that use the

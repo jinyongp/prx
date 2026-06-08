@@ -267,7 +267,7 @@ func TestExposeScopedGlobalAndNamedProjectReload(t *testing.T) {
 	if calls[0].scope != defaultListenerRef().String() || len(calls[0].routes) != 2 || routeExposed(calls[0].routes, "web.localhost", "") {
 		t.Fatalf("first reload = %+v", calls[0])
 	}
-	if calls[1].scope != defaultListenerRef().String() || len(calls[1].routes) != 2 || routeExposed(calls[1].routes, "web.localhost", "") || !routeExposed(calls[1].routes, "api.localhost", "user:pass") {
+	if calls[1].scope != defaultListenerRef().String() || len(calls[1].routes) != 3 || routeExposed(calls[1].routes, "web.localhost", "") || !routeExposed(calls[1].routes, "api.localhost", "user:pass") || !routeExposed(calls[1].routes, "api.local", "user:pass") {
 		t.Fatalf("second reload = %+v", calls[1])
 	}
 }
@@ -464,6 +464,174 @@ func TestExposeAddsPublicURLHostAlias(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), "https://anubis.tail6c50d7.ts.net") || !strings.Contains(out.String(), "local.stamp.is") {
 		t.Fatalf("stdout = %s", out.String())
+	}
+}
+
+func TestDeriveLANDomain(t *testing.T) {
+	tests := map[string]string{
+		"app.example.com":    "app.example.com.local",
+		"web.demo.localhost": "web.demo.local",
+		"myapp.local":        "myapp.local",
+		"API.Example.COM.":   "api.example.com.local",
+	}
+	for input, want := range tests {
+		if got := deriveLANDomain(input); got != want {
+			t.Fatalf("deriveLANDomain(%q) = %q, want %q", input, got, want)
+		}
+	}
+}
+
+func TestExposeLANDerivesAliasFromPrimaryDomain(t *testing.T) {
+	isolate(t)
+	shortConfigDir, err := os.MkdirTemp("/tmp", "gate-cli-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(shortConfigDir) })
+	t.Setenv("XDG_CONFIG_HOME", shortConfigDir)
+	t.Setenv("XDG_STATE_HOME", shortConfigDir)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "app.example.com", Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	srv := proxy.New(nil, nil)
+	stopListener, err := daemon.ServeAdmin(context.Background(), defaultListenerRef().socketPath(), srv)
+	if err != nil {
+		t.Fatalf("ServeAdmin listener: %v", err)
+	}
+	defer stopListener()
+
+	oldSetRoutes := setListenerRoutesFunc
+	t.Cleanup(func() { setListenerRoutesFunc = oldSetRoutes })
+	var final []proxy.Route
+	setListenerRoutesFunc = func(scope listenerDaemonRef, routes []proxy.Route) error {
+		final = append([]proxy.Route{}, routes...)
+		return oldSetRoutes(scope, routes)
+	}
+
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		return fakeExposeProvider{}, nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"-g", "web", "--via", "lan"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Expose exit = %d, stderr=%s", code, errb.String())
+	}
+	if !routeExposed(final, "app.example.com", "") {
+		t.Fatalf("base route not exposed: %+v", final)
+	}
+	if !routeExposed(final, "app.example.com.local", "") {
+		t.Fatalf("LAN alias route not exposed: %+v", final)
+	}
+	if !routeForwardHost(final, "app.example.com.local", "app.example.com") {
+		t.Fatalf("LAN alias missing forward host: %+v", final)
+	}
+	if !strings.Contains(out.String(), "https://app.example.com.local") || !strings.Contains(out.String(), "app.example.com") {
+		t.Fatalf("stdout = %s", out.String())
+	}
+}
+
+func TestExposeLANUsesDomainOverride(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "app.example.com", Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		return fakeExposeProvider{}, nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"-g", "web", "--via", "lan", "--domain", "phone.local"}, &out, &errb); code != ExitOK {
+		t.Fatalf("Expose exit = %d, stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(out.String(), "https://phone.local") || !strings.Contains(out.String(), "app.example.com") {
+		t.Fatalf("stdout = %s", out.String())
+	}
+}
+
+func TestExposeDomainFlagValidation(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: "app.example.com", Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		t.Fatal("provider should not be called for invalid --domain")
+		return fakeExposeProvider{}, nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"-g", "web", "--via", "lan", "--domain", "phone.example.com"}, &out, &errb); code != ExitUsage {
+		t.Fatalf("Expose invalid LAN domain exit = %d, stderr=%s", code, errb.String())
+	}
+	errb.Reset()
+	if code := Expose([]string{"-g", "web", "--via", "cloudflared", "--domain", "phone.local", "--auth", "user:pass"}, &out, &errb); code != ExitUsage {
+		t.Fatalf("Expose cloudflared --domain exit = %d, stderr=%s", code, errb.String())
+	}
+}
+
+func TestExposeLANRejectsInvalidDerivedDomain(t *testing.T) {
+	isolate(t)
+	longPrimary := strings.Join([]string{
+		strings.Repeat("a", 63),
+		strings.Repeat("b", 63),
+		strings.Repeat("c", 63),
+		strings.Repeat("d", 61),
+	}, ".")
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		return r.Reserve(registry.Reservation{Service: "web", Domain: longPrimary, Port: 4400, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		t.Fatal("provider should not be called for invalid derived LAN domain")
+		return fakeExposeProvider{}, nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"-g", "web", "--via", "lan"}, &out, &errb); code != ExitUsage {
+		t.Fatalf("Expose invalid derived LAN domain exit = %d, stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "invalid domain") {
+		t.Fatalf("stderr = %s", errb.String())
+	}
+}
+
+func TestExposeLANDerivedAliasConflict(t *testing.T) {
+	isolate(t)
+	if err := registryStore().Update(func(r *registry.Registry) error {
+		if err := r.Reserve(registry.Reservation{Service: "web", Domain: "app.example.com", Port: 4400, Standalone: true, Active: true}); err != nil {
+			return err
+		}
+		return r.Reserve(registry.Reservation{Service: "api", Domain: "app.example.com.local", Port: 4401, Standalone: true, Active: true})
+	}); err != nil {
+		t.Fatal(err)
+	}
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		t.Fatal("provider should not be called when LAN alias conflicts")
+		return fakeExposeProvider{}, nil
+	}
+
+	var out, errb bytes.Buffer
+	if code := Expose([]string{"-g", "web", "--via", "lan"}, &out, &errb); code != ExitConflict {
+		t.Fatalf("Expose conflict exit = %d, stderr=%s", code, errb.String())
+	}
+	if !strings.Contains(errb.String(), "app.example.com.local") {
+		t.Fatalf("stderr = %s", errb.String())
 	}
 }
 
@@ -823,6 +991,11 @@ func TestExposeStopTailscaleRequiresForce(t *testing.T) {
 	var out, errb bytes.Buffer
 	if code := Expose([]string{"stop", "-g", "web", "--via", "tailscale"}, &out, &errb); code != ExitError {
 		t.Fatalf("Expose stop exit = %d, want error", code)
+	}
+	oldProvider := exposeProviderFor
+	t.Cleanup(func() { exposeProviderFor = oldProvider })
+	exposeProviderFor = func(string) (expose.Provider, error) {
+		return fakeExposeProvider{}, nil
 	}
 	if code := Expose([]string{"stop", "-g", "web", "--via", "tailscale", "--force"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Expose stop --force exit = %d, stderr=%s", code, errb.String())

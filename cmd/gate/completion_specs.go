@@ -93,6 +93,7 @@ func completionSpecs() []completionSpec {
 		}},
 		{Command: "expose", FlagGroups: []completionFlagGroup{flagsHelp, flagsJSON, flagsScope}, Flags: []completionFlagSpec{
 			stringFlag("via", "", "provider: local|lan|cloudflared|tailscale", staticCompletion("local", "lan", "cloudflared", "tailscale")),
+			stringFlag("domain", "", "LAN .local domain override", nil),
 			noValueFlag("auth", "", "require basic auth as user:pass"),
 			boolFlag("no-auth", "", "expose cloudflared without basic auth"),
 		}, Args: func(ctx *completionContext) []string {

@@ -224,6 +224,53 @@ func TestTailscaleExposeFailsBeforeServeWhenNodeURLMissing(t *testing.T) {
 	}
 }
 
+func TestTailscaleStopResetsOwnedServe(t *testing.T) {
+	oldResetCommand := tailscaleServeResetCommand
+	t.Cleanup(func() { tailscaleServeResetCommand = oldResetCommand })
+	resetCalled := false
+	tailscaleServeResetCommand = func(ctx context.Context) *exec.Cmd {
+		resetCalled = true
+		return exec.CommandContext(ctx, "sh", "-c", "true")
+	}
+	record := Record{
+		Provider: ProviderTailscale,
+		Target:   "local.stamp.is",
+		Command:  "tailscale serve --bg https://local.stamp.is",
+	}
+
+	if err := (Tailscale{}).Stop(context.Background(), record, StopOpts{}); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if !resetCalled {
+		t.Fatal("reset command was not called")
+	}
+}
+
+func TestTailscaleStopRequiresOwnershipOrForce(t *testing.T) {
+	oldResetCommand := tailscaleServeResetCommand
+	t.Cleanup(func() { tailscaleServeResetCommand = oldResetCommand })
+	resetCalled := false
+	tailscaleServeResetCommand = func(ctx context.Context) *exec.Cmd {
+		resetCalled = true
+		return exec.CommandContext(ctx, "sh", "-c", "true")
+	}
+	record := Record{Provider: ProviderTailscale, Target: "local.stamp.is"}
+
+	err := (Tailscale{}).Stop(context.Background(), record, StopOpts{})
+	if err == nil || !strings.Contains(err.Error(), "not owned by gate") {
+		t.Fatalf("Stop error = %v", err)
+	}
+	if resetCalled {
+		t.Fatal("reset command called without ownership or force")
+	}
+	if err := (Tailscale{}).Stop(context.Background(), record, StopOpts{Force: true}); err != nil {
+		t.Fatalf("Stop --force: %v", err)
+	}
+	if !resetCalled {
+		t.Fatal("reset command was not called with force")
+	}
+}
+
 func assertCloudflaredCloseReturns(t *testing.T, provider *Cloudflared) {
 	t.Helper()
 	done := make(chan error, 1)

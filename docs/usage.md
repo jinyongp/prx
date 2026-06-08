@@ -33,7 +33,7 @@ command's flags and positional arguments.
 | `gate untrust` | remove the local root CA from trust stores |
 | `gate ca export [--out path]` | export the local root certificate |
 | `gate doctor [--fix] [--json]` | check and repair gate-owned local state |
-| `gate expose [--via local\|lan\|cloudflared\|tailscale] [--auth user:pass] [--no-auth] [-g\|--global] [-p name\|--project name] <service> [--json]` | expose a scoped service through a provider |
+| `gate expose [--via local\|lan\|cloudflared\|tailscale] [--domain name.local] [--auth user:pass] [--no-auth] [-g\|--global] [-p name\|--project name] <service> [--json]` | expose a scoped service through a provider |
 | `gate expose ls [--via provider] [-g\|--global] [-p name\|--project name] [-a\|--all] [--json]` | list exposure records |
 | `gate expose stop [--via provider] [--force] [-g\|--global] [-p name\|--project name] <service> [--json]` | stop or forget one exposure record |
 | `gate upgrade [-y\|--yes]` | upgrade to the latest release, then run doctor |
@@ -443,7 +443,6 @@ must reach your dev server.
 
 Prerequisites:
 
-- Use a `.local` service domain.
 - Start gate routes first with `gate up -d`.
 - Start the dev server, usually with `gate run <service> -- ...`.
 - Install the exported gate root CA on other devices if you want trusted HTTPS.
@@ -453,7 +452,11 @@ Prerequisites:
 
 Limitations:
 
-- `gate expose <service> --via lan` only accepts a `.local` domain.
+- LAN exposure uses a `.local` name. By default, gate derives that name from the
+  service domain: `.local` domains stay unchanged, `.localhost` becomes
+  `.local`, and all other domains append `.local`.
+- `gate expose <service> --via lan --domain <name.local>` overrides the derived
+  LAN name for one exposure.
 - The current LAN provider does not itself advertise mDNS or edit other devices'
   DNS/hosts files. It validates the domain and marks the running gate route as
   exposed.
@@ -468,7 +471,7 @@ Example `gate.toml`:
 name = "myapp"
 
 [services.web]
-domain = "myapp.local"
+domain = "app.example.com"
 ```
 
 Start the proxy and service:
@@ -485,18 +488,19 @@ Expose the route for LAN clients:
 gate expose web --via lan
 ```
 
-On another device, make sure `myapp.local` resolves to the development machine,
-then open:
+This exposes `https://app.example.com.local` and forwards it to the primary
+route `app.example.com`. On another device, make sure that `.local` name
+resolves to the development machine, then open:
 
 ```text
-https://myapp.local
+https://app.example.com.local
 ```
 
 If needed, find the development machine's LAN IP with your OS network settings
 and map the name manually on the other device:
 
 ```text
-192.168.0.42 myapp.local
+192.168.0.42 app.example.com.local
 ```
 
 ### Public URL With Cloudflared
@@ -588,9 +592,8 @@ Prerequisites:
 Limitations:
 
 - Access is limited to devices allowed by the tailnet and ACLs.
-- The current implementation runs `tailscale serve --bg`; gate does not manage
-  detailed Tailscale Serve state after that.
-- Tear-down is manual with Tailscale commands.
+- The current implementation uses `tailscale serve --bg` and `tailscale serve
+  reset`. Resetting Tailscale Serve affects the machine's Serve configuration.
 
 ```bash
 gate expose web --via tailscale
@@ -613,14 +616,15 @@ https://my-mac.tail6c50d7.ts.net
 gate also reloads a route alias for the Tailscale URL host so host-routed
 services continue to resolve to the exposed service.
 
-`gate expose stop` reports Tailscale records as `unverified`; tear them down
-with Tailscale's serve controls, then pass `--force` to forget the local record
-if needed:
+Stop the exposure with gate:
 
 ```bash
-tailscale serve reset
-gate expose stop web --via tailscale --force
+gate expose stop web --via tailscale
 ```
+
+For safety, gate only resets Tailscale Serve by default when the exposure record
+matches a command gate created. If the record is stale or ownership is unclear,
+pass `--force` to reset Tailscale Serve anyway and forget the record.
 
 ### Expose Command Reference
 
@@ -629,7 +633,7 @@ Supported providers:
 | provider | purpose | notes |
 | --- | --- | --- |
 | `local` | no external exposure | returns the local HTTPS URL |
-| `lan` | same-network access | requires a `.local` service domain |
+| `lan` | same-network access | uses a derived or overridden `.local` LAN name |
 | `cloudflared` | temporary public URL | requires `cloudflared` |
 | `tailscale` | tailnet access | requires `tailscale` |
 

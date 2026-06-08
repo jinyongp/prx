@@ -82,6 +82,7 @@ func Init(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	printInfo(stderr, "next: run `gate up -d`")
+	printInfo(stderr, "lan: `gate expose <service> --via lan` derives a .local alias from the service domain")
 	return ExitOK
 }
 

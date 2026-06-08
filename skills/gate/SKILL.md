@@ -47,7 +47,7 @@ fi
 | `gate port [-g\|--global] [-p name\|--project name] [-a\|--all] [service] [--json]` | print one scoped service port, or list reserved ports |
 | `gate run [-g\|--global] [-p name\|--project name] <service> -- <cmd...>` | run a command with `PORT` injected |
 | `gate down [-g\|--global] [-p name\|--project name] [--json]` | deactivate scoped routes (reservations kept) |
-| `gate expose [--via <provider>] [--auth user:pass] [--no-auth] [-g\|--global] [-p name\|--project name] <service> [--json]` | reach a scoped service externally |
+| `gate expose [--via <provider>] [--domain name.local] [--auth user:pass] [--no-auth] [-g\|--global] [-p name\|--project name] <service> [--json]` | reach a scoped service externally |
 | `gate expose ls [--via provider] [-g\|--global] [-p name\|--project name] [-a\|--all] [--json]` | list exposure records |
 | `gate expose stop [--via <provider>] [--force] [-g\|--global] [-p name\|--project name] <service> [--json]` | stop one exposure |
 | `gate daemon status [-a\|--all] [--json]` | inspect listener proxy status |
@@ -74,6 +74,8 @@ external provider is currently serving it.
 The AUTH column values are `off`, `active`, or `missing`; `missing` means an
 auth-enabled exposure record remains but the session-scoped auth secret must be
 supplied again with `gate expose ... --auth user:pass`.
+`gate expose stop <service> --via tailscale` resets Tailscale Serve when the
+record was created by gate; use `--force` for stale or unclear ownership.
 
 ## Exit codes
 
@@ -160,19 +162,8 @@ Domains ending in `.localhost` need no sudo; custom domains use `/etc/hosts`
 HTTPS `:443` / HTTP `:80`. If the relevant listener daemon is running,
 `up`/`down`/`add`/`rm`/`clear` hot-reload the merged route table for that
 listener. Use `gate daemon status --all` to inspect all known listener daemons.
+`gate expose <service> --via lan` derives a `.local` alias from the service
+domain: `.local` stays unchanged, `.localhost` becomes `.local`, and other
+domains append `.local`. Use `--domain name.local` to override the LAN alias.
 Outside a project, `gate port <name>` and
 `gate run <name> -- ...` resolve global reservations by name.
-
-Shell completion is read-only, local-state aware, quiet on missing/broken local
-state, and uses a stable task-oriented order. It completes root commands,
-`daemon status|start|stop|restart|logs`, `ca export`, `expose ls|stop`,
-`skill path|print`, and `completion bash|zsh|fish`. `--<tab>` shows long flags and `-<tab>` shows short
-flags for the current command/subcommand. `--project` completes registry
-project names. Scoped service/name arguments for `add`, `rm`, `run`, `port`,
-and `expose` complete current-project services inside a project, global
-reservation names outside a project, global names with `-g|--global`, and known
-named-project services with `-p|--project`. Enum completions include
-`ls --route` (`active|inactive`), `ls --upstream` (`live|down`),
-`up --dns` (`localhost|hosts`), and
-`expose --via` (`local|lan|cloudflared|tailscale`). `ca export --out` keeps
-file path completion; service/name positionals do not mix in local file names.

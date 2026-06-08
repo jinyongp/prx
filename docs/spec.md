@@ -478,13 +478,19 @@ flowchart LR
 | Provider | Scope | Requirements | Notes |
 | --- | --- | --- | --- |
 | `local` | Same machine | active route | No external exposure. |
-| `lan` | Same network | `.local` domain, reachable machine, trusted CA on clients | gate validates and marks the route exposed; it does not configure other devices' DNS. |
+| `lan` | Same network | derived or overridden `.local` domain, reachable machine, trusted CA on clients | gate validates and marks the route exposed; it does not configure other devices' DNS. |
 | `cloudflared` | Public temporary URL | `cloudflared` in `PATH` | Requires authenticated exposure or an explicit unauthenticated opt-out; quick tunnel URL is temporary. |
-| `tailscale` | Tailnet | logged-in `tailscale` in `PATH` | Uses Tailscale Serve; detailed teardown is handled with Tailscale commands. |
+| `tailscale` | Tailnet | logged-in `tailscale` in `PATH` | Uses Tailscale Serve; stop resets Serve when the record is gate-owned or force removal is requested. |
 
 Exposure activation targets one scoped active route. Without an explicit scope,
 it resolves the current project when inside a `gate.toml` tree and global
 reservations otherwise.
+
+LAN exposure keeps the service's primary configured domain as the target and
+uses a `.local` public alias. By default, a primary domain ending in `.local`
+is reused, a primary domain ending in `.localhost` is converted to `.local`,
+and all other primary domains append `.local`. A LAN exposure may override the
+derived alias with an explicit `.local` domain.
 
 Security rule: exposing a route is the only way non-loopback clients can pass
 the proxy's loopback guard.

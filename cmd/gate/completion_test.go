@@ -232,6 +232,7 @@ func TestCompletionEnumFlagValues(t *testing.T) {
 	assertCompletionContains(t, completeGate(t, "up", "--dns", ""), "localhost", "hosts")
 	assertCompletionContains(t, completeGate(t, "expose", "web", "--via", ""), "local", "lan", "cloudflared", "tailscale")
 	assertCompletionContains(t, completeGate(t, "expose", "ls", "--via", ""), "local", "lan", "cloudflared", "tailscale")
+	assertCompletionContains(t, completeGate(t, "expose", "--"), "--domain")
 }
 
 func TestCompletionFlagPrefixes(t *testing.T) {

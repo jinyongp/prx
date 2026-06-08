@@ -14,6 +14,7 @@ import (
 	"text/tabwriter"
 
 	"gate/internal/ca"
+	"gate/internal/config"
 	"gate/internal/expose"
 	"gate/internal/paths"
 	"gate/internal/proxy"
@@ -127,6 +128,7 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 	}
 	fs := flag.NewFlagSet("expose", flag.ContinueOnError)
 	via := fs.String("via", "local", "provider: local|lan|cloudflared|tailscale")
+	domain := fs.String("domain", "", "LAN .local domain override")
 	auth := fs.String("auth", "", "require basic auth as user:pass")
 	noAuth := fs.Bool("no-auth", false, "expose cloudflared without basic auth")
 	jsonOut := fs.Bool("json", false, "emit JSON")
@@ -155,6 +157,24 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, *jsonOut, ExitUsage, "bad_auth", err.Error())
 	}
+	exposeDomain, err := exposeDomainForProvider(providerName, res.Domain, *domain)
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitUsage, "bad_domain", err.Error())
+	}
+	ref := listenerRefFor(res.ListenerPair())
+	if providerName == expose.ProviderLAN && exposeDomain != res.Domain {
+		reg, rerr := registryStore().Read()
+		if rerr != nil {
+			return fail(stderr, *jsonOut, ExitError, "registry", rerr.Error())
+		}
+		records, rerr := exposureStore().Read()
+		if rerr != nil {
+			return fail(stderr, *jsonOut, ExitError, "expose_store", rerr.Error())
+		}
+		if err := validateLANAliasAvailable(ref, reg, records, exposeDomain, res.Domain); err != nil {
+			return fail(stderr, *jsonOut, ExitConflict, "domain_conflict", err.Error())
+		}
+	}
 	provider, err := exposeProviderFor(providerName)
 	if err != nil {
 		return fail(stderr, *jsonOut, ExitUsage, "bad_provider", err.Error())
@@ -166,7 +186,7 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 	if exposeActivityAllowed(providerName) {
 		activity = startActivity(stderr, *jsonOut, "starting tunnel")
 	}
-	result, err := provider.Expose(context.Background(), res.Domain, expose.Opts{Auth: routeAuth})
+	result, err := provider.Expose(context.Background(), exposeDomain, expose.Opts{Auth: routeAuth})
 	if activity != nil {
 		if err != nil {
 			activity.Stop()
@@ -181,7 +201,6 @@ func Expose(args []string, stdout, stderr io.Writer) int {
 	// External providers lift the loopback guard and can apply optional auth,
 	// then the listener daemon is hot-reloaded. Auth is session-scoped: it lives
 	// in the in-memory route table, not the persisted registry.
-	ref := listenerRefFor(res.ListenerPair())
 	record := expose.Record{
 		Scope:       exposureScope(res),
 		Project:     res.Project,
@@ -456,6 +475,71 @@ func exposeRouteAuth(via, userpass string, noAuth bool) (string, error) {
 		return "", fmt.Errorf("--via cloudflared requires --auth user:pass or --no-auth")
 	}
 	return "", nil
+}
+
+func exposeDomainForProvider(via, primary, override string) (string, error) {
+	primary = config.CanonicalDomain(primary)
+	override = config.CanonicalDomain(override)
+	if override != "" {
+		if via != expose.ProviderLAN {
+			return "", fmt.Errorf("--domain is only supported with --via lan")
+		}
+		if err := config.ValidateDomain(override); err != nil {
+			return "", err
+		}
+		if !strings.HasSuffix(override, ".local") {
+			return "", fmt.Errorf("--domain for --via lan must end in .local")
+		}
+		return override, nil
+	}
+	if via == expose.ProviderLAN {
+		derived := deriveLANDomain(primary)
+		if err := config.ValidateDomain(derived); err != nil {
+			return "", err
+		}
+		return derived, nil
+	}
+	return primary, nil
+}
+
+func deriveLANDomain(primary string) string {
+	primary = config.CanonicalDomain(primary)
+	switch {
+	case strings.HasSuffix(primary, ".local"):
+		return primary
+	case strings.HasSuffix(primary, ".localhost"):
+		return strings.TrimSuffix(primary, ".localhost") + ".local"
+	default:
+		return primary + ".local"
+	}
+}
+
+func validateLANAliasAvailable(ref listenerDaemonRef, reg *registry.Registry, records []expose.Record, alias, target string) error {
+	alias = config.CanonicalDomain(alias)
+	target = config.CanonicalDomain(target)
+	if alias == target {
+		return nil
+	}
+	for _, route := range activeRoutesForListener(reg, ref.Pair) {
+		domain := config.CanonicalDomain(route.Domain)
+		if domain == alias && domain != target {
+			return fmt.Errorf("LAN domain %q conflicts with active route %q", alias, route.Domain)
+		}
+	}
+	for _, record := range records {
+		publicHost := config.CanonicalDomain(exposurePublicHost(record))
+		if publicHost == "" || publicHost != alias {
+			continue
+		}
+		res, ok := exposureRecordReservation(record, reg)
+		if !ok || listenerRefFor(res.ListenerPair()).String() != ref.String() {
+			continue
+		}
+		if config.CanonicalDomain(record.Target) != target {
+			return fmt.Errorf("LAN domain %q conflicts with exposure for %q", alias, record.Target)
+		}
+	}
+	return nil
 }
 
 func normalizeExposeProvider(via string) string {

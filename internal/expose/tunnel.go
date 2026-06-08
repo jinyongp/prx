@@ -38,6 +38,9 @@ var (
 		//nolint:gosec // G204: fixed binary; target comes from the project config.
 		return exec.CommandContext(ctx, "tailscale", "serve", "--bg", target)
 	}
+	tailscaleServeResetCommand = func(ctx context.Context) *exec.Cmd {
+		return exec.CommandContext(ctx, "tailscale", "serve", "reset")
+	}
 )
 
 // Expose starts a quick tunnel to the local HTTPS address for domain and
@@ -225,14 +228,28 @@ func (Tailscale) Status(context.Context, Record) (string, error) {
 	return StatusUnverified, nil
 }
 
-func (Tailscale) Stop(_ context.Context, _ Record, opts StopOpts) error {
-	if opts.Force {
-		return nil
+func (Tailscale) Stop(ctx context.Context, record Record, opts StopOpts) error {
+	if !opts.Force && !tailscaleRecordOwned(record) {
+		return fmt.Errorf("expose: tailscale serve state is not owned by gate; pass --force to reset anyway")
 	}
-	return fmt.Errorf("expose: tailscale teardown is manual; run tailscale serve reset or pass --force to forget the record")
+	cmd := tailscaleServeResetCommand(ctx)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		if errors.Is(err, exec.ErrNotFound) {
+			return fmt.Errorf("expose: tailscale not found in PATH; install tailscale and retry")
+		}
+		return fmt.Errorf("expose: tailscale serve reset failed: %w: %s", err, out)
+	}
+	return nil
 }
 
-// Close is a no-op; `tailscale serve reset` tears down manually.
+func tailscaleRecordOwned(record Record) bool {
+	if record.Provider != ProviderTailscale {
+		return false
+	}
+	return strings.TrimSpace(record.Command) == "tailscale serve --bg https://"+record.Target
+}
+
+// Close is a no-op; Stop tears down Tailscale Serve.
 func (Tailscale) Close() error { return nil }
 
 func processExists(pid int) bool {
