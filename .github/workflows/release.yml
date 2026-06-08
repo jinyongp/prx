@@ -151,6 +151,10 @@ jobs:
           ssh-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
           path: tap
           fetch-depth: 0
+      - name: wait for release assets
+        run: bash source/.github/scripts/wait-release-assets.sh "${VERSION_TAG}"
+        env:
+          VERSION_TAG: ${{ needs.release_tag.outputs.tag }}
       - name: generate binary formula
         run: bash source/.github/scripts/generate-homebrew-binary-formula.sh tap "${VERSION_TAG}"
         env:
