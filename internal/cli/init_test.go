@@ -29,6 +29,9 @@ func TestInitCreatesValidConfig(t *testing.T) {
 	if p.Name != "demo" {
 		t.Fatalf("project name = %q", p.Name)
 	}
+	if p.Base != "demo.localhost" {
+		t.Fatalf("project base = %q", p.Base)
+	}
 	svc, ok := p.Services["web"]
 	if !ok || svc.Domain != "web.demo.localhost" {
 		t.Fatalf("web service = %+v", p.Services)
@@ -89,9 +92,10 @@ func TestInitNonInteractiveRequiresYes(t *testing.T) {
 func TestRenderInteractiveCustomDomainSpec(t *testing.T) {
 	spec := initSpec{
 		ProjectName: "demo",
+		BaseDomain:  "local.project.test",
 		Services: []initService{
-			{Name: "web", Domain: "local.project.test"},
-			{Name: "api", Domain: "api.local.project.test", Port: 3001},
+			{Name: "web", Host: "."},
+			{Name: "api", Port: 3001},
 		},
 	}
 	got := renderInitSpec(spec)
@@ -112,13 +116,14 @@ func TestRenderInteractiveCustomDomainSpec(t *testing.T) {
 }
 
 func TestDefaultServiceDomainIncludesServiceName(t *testing.T) {
-	if got := defaultServiceDomain("web", "gate", "localhost", ""); got != "web.gate.localhost" {
+	spec := initSpec{ProjectName: "demo", BaseDomain: "gate.localhost"}
+	if got := initServiceDomain(spec, initService{Name: "web"}); got != "web.gate.localhost" {
 		t.Fatalf("web localhost domain = %q", got)
 	}
-	if got := defaultServiceDomain("app", "gate", "localhost", ""); got != "app.gate.localhost" {
+	if got := initServiceDomain(spec, initService{Name: "app"}); got != "app.gate.localhost" {
 		t.Fatalf("app localhost domain = %q", got)
 	}
-	if got := defaultServiceDomain("web", "gate", "custom", "local.gate.test"); got != "web.local.gate.test" {
+	if got := initServiceDomain(initSpec{BaseDomain: "local.gate.test"}, initService{Name: "web"}); got != "web.local.gate.test" {
 		t.Fatalf("web custom domain = %q", got)
 	}
 }
@@ -332,45 +337,6 @@ func TestRenderPortPromptShowsInvalidPort(t *testing.T) {
 	}
 }
 
-func TestPromptServiceDomainAppendsLocalhostSuffixInLocalhostMode(t *testing.T) {
-	reader := bufio.NewReader(strings.NewReader("app\n"))
-	var out bytes.Buffer
-	got, err := promptServiceDomain(reader, &out, "Localhost prefix for web", "web.demo.localhost", "localhost")
-	if err != nil {
-		t.Fatalf("promptServiceDomain: %v", err)
-	}
-	if got != "app.localhost" {
-		t.Fatalf("domain = %q", got)
-	}
-}
-
-func TestPromptServiceDomainDoesNotDuplicateLocalhostSuffix(t *testing.T) {
-	reader := bufio.NewReader(strings.NewReader("app.localhost\n"))
-	var out bytes.Buffer
-	got, err := promptServiceDomain(reader, &out, "Localhost prefix for web", "web.demo.localhost", "localhost")
-	if err != nil {
-		t.Fatalf("promptServiceDomain: %v", err)
-	}
-	if got != "app.localhost" {
-		t.Fatalf("domain = %q", got)
-	}
-}
-
-func TestPromptServiceDomainRejectsInvalidLocalhostPrefix(t *testing.T) {
-	reader := bufio.NewReader(strings.NewReader("web.gate...\napp\n"))
-	var out bytes.Buffer
-	got, err := promptServiceDomain(reader, &out, "Localhost prefix for web", "web.demo.localhost", "localhost")
-	if err != nil {
-		t.Fatalf("promptServiceDomain: %v", err)
-	}
-	if got != "app.localhost" {
-		t.Fatalf("domain = %q", got)
-	}
-	if !strings.Contains(out.String(), `invalid domain "web.gate...localhost"`) {
-		t.Fatalf("missing invalid domain message:\n%s", out.String())
-	}
-}
-
 func TestPromptCustomBaseDomainRejectsInvalidDomain(t *testing.T) {
 	reader := bufio.NewReader(strings.NewReader("asdfdasf...fdafsafds\ncustom\nlocal.demo.test\n"))
 	var out bytes.Buffer
@@ -397,46 +363,5 @@ func TestRenderCustomBaseDomainPromptShowsInvalidDomain(t *testing.T) {
 	}
 	if !strings.Contains(out.String(), `custom domain "custom" must include at least one dot`) {
 		t.Fatalf("missing live invalid domain message:\n%s", out.String())
-	}
-}
-
-func TestRenderLocalhostPrefixPromptShowsInvalidDomain(t *testing.T) {
-	var out bytes.Buffer
-	frame := promptInputFrame{Prompt: "What localhost name should web use? "}
-	if err := renderPromptInput(&out, &frame, "web.gate...", localhostPromptSpec("Localhost prefix", "web.gate")); err != nil {
-		t.Fatalf("renderPromptInput: %v", err)
-	}
-	if !strings.Contains(out.String(), `invalid domain "web.gate...localhost"`) {
-		t.Fatalf("missing live invalid domain message:\n%s", out.String())
-	}
-}
-
-func TestPromptServiceDomainAllowsCustomDomainInCustomMode(t *testing.T) {
-	reader := bufio.NewReader(strings.NewReader("app.example.test\n"))
-	var out bytes.Buffer
-	got, err := promptServiceDomain(reader, &out, "Domain for web", "web.local.demo.test", "custom")
-	if err != nil {
-		t.Fatalf("promptServiceDomain: %v", err)
-	}
-	if got != "app.example.test" {
-		t.Fatalf("domain = %q", got)
-	}
-}
-
-func TestPromptServiceDomainRejectsInvalidCustomDomain(t *testing.T) {
-	reader := bufio.NewReader(strings.NewReader("bad name\ncustom\napp.example.test\n"))
-	var out bytes.Buffer
-	got, err := promptServiceDomain(reader, &out, "Domain for web", "web.local.demo.test", "custom")
-	if err != nil {
-		t.Fatalf("promptServiceDomain: %v", err)
-	}
-	if got != "app.example.test" {
-		t.Fatalf("domain = %q", got)
-	}
-	if !strings.Contains(out.String(), `invalid domain "bad name"`) {
-		t.Fatalf("missing invalid domain message:\n%s", out.String())
-	}
-	if !strings.Contains(out.String(), `custom domain "custom" must include at least one dot`) {
-		t.Fatalf("missing single-label custom domain message:\n%s", out.String())
 	}
 }

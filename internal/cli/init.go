@@ -75,10 +75,11 @@ func Init(args []string, stdout, stderr io.Writer) int {
 	printSuccess(stdout, "created "+config.Filename)
 	printKV(stdout, "project", spec.ProjectName)
 	for _, svc := range spec.Services {
+		domain := initServiceDomain(spec, svc)
 		if svc.Port == 0 {
-			printKV(stdout, "service", fmt.Sprintf("%s -> %s", svc.Name, svc.Domain))
+			printKV(stdout, "service", fmt.Sprintf("%s -> %s", svc.Name, domain))
 		} else {
-			printKV(stdout, "service", fmt.Sprintf("%s -> %s (:%d)", svc.Name, svc.Domain, svc.Port))
+			printKV(stdout, "service", fmt.Sprintf("%s -> %s (:%d)", svc.Name, domain, svc.Port))
 		}
 	}
 	printInfo(stderr, "next: run `gate up -d`")
@@ -88,12 +89,14 @@ func Init(args []string, stdout, stderr io.Writer) int {
 
 type initSpec struct {
 	ProjectName string
+	BaseDomain  string
 	Services    []initService
 }
 
 type initService struct {
 	Name   string
 	Domain string
+	Host   string
 	Port   int
 }
 
@@ -101,11 +104,28 @@ func defaultInitSpec(projectName string) initSpec {
 	label := domainLabel(projectName)
 	return initSpec{
 		ProjectName: projectName,
+		BaseDomain:  label + ".localhost",
 		Services: []initService{{
-			Name:   "web",
-			Domain: defaultServiceDomain("web", label, "localhost", ""),
+			Name: "web",
 		}},
 	}
+}
+
+func initServiceDomain(spec initSpec, svc initService) string {
+	if svc.Domain != "" {
+		return svc.Domain
+	}
+	if svc.Host == "." {
+		return spec.BaseDomain
+	}
+	host := svc.Host
+	if host == "" {
+		host = svc.Name
+	}
+	if spec.BaseDomain == "" {
+		return host
+	}
+	return host + "." + spec.BaseDomain
 }
 
 func promptInitSpec(stdout io.Writer, defaultName string) (initSpec, error) {
@@ -127,7 +147,8 @@ func promptInitSpec(stdout io.Writer, defaultName string) (initSpec, error) {
 		serviceNames = []string{"web"}
 	}
 
-	baseDomain := ""
+	projectLabel := domainLabel(projectName)
+	baseDomain := projectLabel + ".localhost"
 	if mode == "custom" {
 		baseDomain, err = promptCustomBaseDomain(reader, stdout, projectName)
 		if err != nil {
@@ -135,23 +156,13 @@ func promptInitSpec(stdout io.Writer, defaultName string) (initSpec, error) {
 		}
 	}
 
-	spec := initSpec{ProjectName: projectName, Services: make([]initService, 0, len(serviceNames))}
-	projectLabel := domainLabel(projectName)
+	spec := initSpec{ProjectName: projectName, BaseDomain: baseDomain, Services: make([]initService, 0, len(serviceNames))}
 	for _, name := range serviceNames {
-		defaultDomain := defaultServiceDomain(name, projectLabel, mode, baseDomain)
-		domainLabel := fmt.Sprintf("What domain should %s use?", name)
-		if mode == "localhost" {
-			domainLabel = fmt.Sprintf("What localhost name should %s use?", name)
-		}
-		domain, err := promptServiceDomain(reader, stdout, domainLabel, defaultDomain, mode)
-		if err != nil {
-			return initSpec{}, err
-		}
 		port, err := promptOptionalPort(reader, stdout, fmt.Sprintf("What fixed port should %s use?", name), projectName, name)
 		if err != nil {
 			return initSpec{}, err
 		}
-		spec.Services = append(spec.Services, initService{Name: name, Domain: domain, Port: port})
+		spec.Services = append(spec.Services, initService{Name: name, Port: port})
 	}
 	return spec, nil
 }
@@ -252,20 +263,8 @@ func occupiedPortPrompt(fixedPort int) string {
 	return ""
 }
 
-func promptServiceDomain(reader *bufio.Reader, stdout io.Writer, label, def, mode string) (string, error) {
-	if mode == "localhost" {
-		return promptLocalhostDomainPrefix(reader, stdout, label, def)
-	}
-	return promptInput(reader, stdout, customDomainPromptSpec(label, def))
-}
-
 func promptCustomBaseDomain(reader *bufio.Reader, stdout io.Writer, projectName string) (string, error) {
 	return promptInput(reader, stdout, customDomainPromptSpec("What base custom domain should gate use?", "local."+domainLabel(projectName)+".test"))
-}
-
-func promptLocalhostDomainPrefix(reader *bufio.Reader, stdout io.Writer, label, def string) (string, error) {
-	defaultPrefix := strings.TrimSuffix(canonicalPromptDomain(def), ".localhost")
-	return promptInput(reader, stdout, localhostPromptSpec(label, defaultPrefix))
 }
 
 func domainPromptSpec(label, def string) promptInputSpec {
@@ -284,19 +283,6 @@ func customDomainPromptSpec(label, def string) promptInputSpec {
 	return spec
 }
 
-func localhostPromptSpec(label, defaultPrefix string) promptInputSpec {
-	return promptInputSpec{
-		Label:            label,
-		Default:          defaultPrefix,
-		Placeholder:      defaultPrefix + ".localhost",
-		Suffix:           ".localhost",
-		Normalize:        localhostDomainValue,
-		Validate:         validateLocalhostDomain,
-		LiveDisplay:      localhostLiveDisplay,
-		ConfirmedDisplay: func(value string) string { return value },
-	}
-}
-
 func portPromptSpec(label string) promptInputSpec {
 	return promptInputSpec{
 		Label:       label,
@@ -308,18 +294,6 @@ func portPromptSpec(label string) promptInputSpec {
 		Normalize: normalizePromptPort,
 		Validate:  validatePromptPort,
 	}
-}
-
-func localhostDomainValue(raw string) string {
-	prefix := localhostPrefix(raw)
-	if prefix == "" {
-		return ".localhost"
-	}
-	return prefix + ".localhost"
-}
-
-func localhostLiveDisplay(raw, value string) string {
-	return strings.TrimSuffix(value, ".localhost")
 }
 
 func validatePromptDomain(domain string) error {
@@ -334,17 +308,6 @@ func validateCustomPromptDomain(domain string) error {
 		return fmt.Errorf("custom domain %q must include at least one dot", domain)
 	}
 	return nil
-}
-
-func validateLocalhostDomain(domain string) error {
-	if strings.TrimSuffix(domain, ".localhost") == "" {
-		return errors.New("localhost prefix is required")
-	}
-	return validatePromptDomain(domain)
-}
-
-func localhostPrefix(raw string) string {
-	return strings.TrimSuffix(canonicalPromptDomain(raw), ".localhost")
 }
 
 func normalizePromptPort(raw string) string {
@@ -375,13 +338,6 @@ func splitServiceNames(raw string) []string {
 	return out
 }
 
-func defaultServiceDomain(serviceName, projectLabel, mode, baseDomain string) string {
-	if mode == "custom" {
-		return serviceName + "." + baseDomain
-	}
-	return serviceName + "." + projectLabel + ".localhost"
-}
-
 func parseOptionalPort(raw string) (int, error) {
 	raw = strings.TrimSpace(raw)
 	if raw == "" || strings.EqualFold(raw, "auto") {
@@ -401,8 +357,16 @@ func canonicalPromptDomain(domain string) string {
 func renderInitSpec(spec initSpec) string {
 	var b strings.Builder
 	fmt.Fprintf(&b, "[project]\nname = %q\n", spec.ProjectName)
+	if spec.BaseDomain != "" {
+		fmt.Fprintf(&b, "base = %q\n", spec.BaseDomain)
+	}
 	for _, svc := range spec.Services {
-		fmt.Fprintf(&b, "\n[services.%s]\ndomain = %q\n", svc.Name, svc.Domain)
+		fmt.Fprintf(&b, "\n[services.%s]\n", svc.Name)
+		if svc.Domain != "" {
+			fmt.Fprintf(&b, "domain = %q\n", svc.Domain)
+		} else if svc.Host != "" {
+			fmt.Fprintf(&b, "host = %q\n", svc.Host)
+		}
 		if svc.Port != 0 {
 			fmt.Fprintf(&b, "port = %d\n", svc.Port)
 		}

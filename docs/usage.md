@@ -20,7 +20,7 @@ command's flags and positional arguments.
 | `gate ls [--route active\|inactive] [--upstream live\|down] [-g\|--global] [-p name\|--project name] [-a\|--all] [--json]` | list reservations with route and upstream status |
 | `gate port [-g\|--global] [-p name\|--project name] [-a\|--all] [service] [--json]` | print one service port or list reserved ports |
 | `gate run [-g\|--global] [-p name\|--project name] <service> -- <cmd...>` | run a child command with `PORT` injected |
-| `gate add [-g\|--global] [-p name\|--project name] <service> <domain> <port> [--json]` | add or update one reservation |
+| `gate add [-g\|--global] [-p name\|--project name] [--host host] [--domain domain] <service> <port> [--json]` | add or update one reservation |
 | `gate rm [-g\|--global] [-p name\|--project name] <service> [--json]` | remove one reservation |
 | `gate clear [-g\|--global] [-p name\|--project name] [-y\|--yes] [--json]` | remove all reservations in one scope |
 | `gate prune [--json]` | remove stale project reservations whose config file is gone |
@@ -131,13 +131,13 @@ Example `gate.toml`:
 ```toml
 [project]
 name = "myapp"
+base = "myapp.localhost"
 
 [services.web]
-domain = "app.localhost"
 
 [services.api]
-domain = "api.localhost"
 port = 3001
+env = "API_URL"
 ```
 
 Bring the project up and start the daemon:
@@ -159,6 +159,11 @@ Run a dev server with its reserved port injected as `PORT`:
 gate run web -- pnpm dev
 ```
 
+`gate run` also injects peer service values into the child process:
+`GATE_<SERVICE>_PORT`, `GATE_<SERVICE>_URL`,
+`GATE_<SERVICE>_ROUTE_URL`, and any service-declared env names such as
+`API_URL`. Loopback URLs use `http://127.0.0.1:<port>`.
+
 Open:
 
 ```text
@@ -179,7 +184,7 @@ when you already know the domain and port and do not want a project file.
 Add a mapping:
 
 ```bash
-gate add -g web web.localhost 3000
+gate add -g web 3000 --domain web.localhost
 ```
 
 Global reservations are served by the listener daemon. If that daemon is
@@ -262,22 +267,35 @@ gate port -p myapp web
 Add a current-project service and fixed port:
 
 ```bash
-gate add web app.localhost 3000
+gate add web 3000
 ```
 
 Inside a project, this adds or updates the `[services.<name>]` block in
-`gate.toml` and updates the registry.
+`gate.toml` and updates the registry. With `[project] base = "myapp.localhost"`,
+the default service domain is `web.myapp.localhost`.
+
+Override the service host label under the project base:
+
+```bash
+gate add api 3001 --host app
+```
+
+Use a full-domain escape hatch:
+
+```bash
+gate add admin 3002 --domain console.internal.example.com
+```
 
 Add a global reservation:
 
 ```bash
-gate add -g web web.localhost 3000
+gate add -g web 3000 --domain web.localhost
 ```
 
 Add a named project reservation:
 
 ```bash
-gate add -p myapp web app.localhost 3000
+gate add -p myapp web 3000 --domain app.localhost
 ```
 
 Activate or deactivate existing global or named-project reservations from the
@@ -386,7 +404,7 @@ gate ls --json
 gate port -a --json
 gate daemon status --json
 gate doctor --json
-gate add web app.localhost 3000 --json
+gate add web 3000 --json
 gate rm web --json
 gate clear -y --json
 gate prune --json
@@ -418,8 +436,12 @@ Install `gate-root.crt` on the other device as a trusted root certificate.
 For browser access on the same machine, use `.localhost` domains when possible:
 
 ```toml
+[project]
+name = "myapp"
+base = "app.localhost"
+
 [services.web]
-domain = "app.localhost"
+host = "."
 ```
 
 Then:
@@ -469,9 +491,10 @@ Example `gate.toml`:
 ```toml
 [project]
 name = "myapp"
+base = "app.example.com"
 
 [services.web]
-domain = "app.example.com"
+host = "."
 ```
 
 Start the proxy and service:

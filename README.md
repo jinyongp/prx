@@ -119,13 +119,13 @@ Run this inside your app repository.
    ```toml
    [project]
    name = "my-project"
+   base = "my-project.localhost"
 
    [services.web]
-   domain = "web.my-project.localhost"
 
    [services.api]
-   domain = "api.my-project.localhost"
    port = 3001
+   env = "API_URL"
    ```
 
 3. Start gate and run your dev server through the reserved port:
@@ -135,8 +135,9 @@ Run this inside your app repository.
    gate run web -- pnpm dev
    ```
 
-   Replace `pnpm dev` with your app's dev-server command. `gate run` injects the
-   reserved port as `PORT`.
+   Replace `pnpm dev` with your app's dev-server command. `gate run` injects
+   `PORT`, peer `GATE_<SERVICE>_*` values, and configured service env names
+   such as `API_URL`.
 
 4. Open:
 
@@ -162,7 +163,7 @@ inspect every known listener daemon.
 Global reservations are machine-local mappings without `gate.toml`:
 
 ```bash
-gate add -g web web.localhost 3000
+gate add -g web 3000 --domain web.localhost
 gate daemon start
 gate run -g web -- pnpm dev
 gate rm -g web
@@ -176,21 +177,21 @@ service/name. Use `gate clear -y`, `gate clear -g -y`, or
 
 ### Environment-backed config
 
-`domain` and `port` can read environment variables when a team needs
-per-developer values:
+`base`, `domain`, `host`, and `port` can read environment variables when a team
+needs per-developer values:
 
 ```toml
 [project]
 name = "my-project"
 env_files = [".env.local", ".env"]
+base = "${BASE_DOMAIN:-example.localhost}"
 
 [services.web]
-domain = "${WEB_DOMAIN:-app.example.localhost}"
 port = "${WEB_PORT:-3000}"
 
 [services.api]
-domain = "api.${BASE_DOMAIN:-example.localhost}"
 port = "${API_PORT}"
+env = "API_URL"
 ```
 
 `env_files` are resolved relative to `gate.toml`. Missing files are ignored, so

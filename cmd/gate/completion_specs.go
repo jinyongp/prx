@@ -65,7 +65,10 @@ func completionSpecs() []completionSpec {
 			}
 			return completeScopedNames(ctx)
 		}, DisableFileCompletion: true},
-		{Command: "add", FlagGroups: []completionFlagGroup{flagsHelp, flagsJSON, flagsScope}, Args: scopedService, DisableFileCompletion: true},
+		{Command: "add", FlagGroups: []completionFlagGroup{flagsHelp, flagsJSON, flagsScope}, Flags: []completionFlagSpec{
+			stringFlag("host", "", "service host label under project base", nil),
+			stringFlag("domain", "", "full service domain", nil),
+		}, Args: scopedService, DisableFileCompletion: true},
 		{Command: "rm", FlagGroups: []completionFlagGroup{flagsHelp, flagsJSON, flagsScope}, Args: scopedService, DisableFileCompletion: true},
 		{Command: "clear", FlagGroups: []completionFlagGroup{flagsHelp, flagsJSON, flagsScope, flagsYes}, Args: noArgs, DisableFileCompletion: true},
 		{Command: "prune", FlagGroups: []completionFlagGroup{flagsHelp, flagsJSON}, Args: noArgs, DisableFileCompletion: true},

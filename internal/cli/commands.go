@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sort"
 	"strconv"
 	"strings"
 	"text/tabwriter"
@@ -148,7 +149,7 @@ func Ls(args []string, stdout, stderr io.Writer) int {
 		return writeJSON(stdout, map[string]any{"services": rows})
 	}
 	if len(rows) == 0 {
-		printEmpty(stdout, "No reservations yet — run `gate up` in a project or `gate add <service> <domain> <port>`.", "No reservations.")
+		printEmpty(stdout, "No reservations yet — run `gate up` in a project or `gate add <service> <port>`.", "No reservations.")
 		return ExitOK
 	}
 	if richOut(stdout, false) {
@@ -246,7 +247,7 @@ func listPorts(stdout, stderr io.Writer, jsonOut bool, sel registryScopeSelectio
 		return writeJSON(stdout, map[string]any{"ports": rows})
 	}
 	if len(rows) == 0 {
-		printEmpty(stdout, "No reserved ports yet — run `gate up` in a project or `gate add <service> <domain> <port>`.", "No reserved ports.")
+		printEmpty(stdout, "No reserved ports yet — run `gate up` in a project or `gate add <service> <port>`.", "No reserved ports.")
 		return ExitOK
 	}
 	if richOut(stdout, false) {
@@ -284,6 +285,8 @@ func displayPortScope(r portRow) string {
 func Add(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("add", flag.ContinueOnError)
 	jsonOut := fs.Bool("json", false, "emit JSON")
+	hostFlag := fs.String("host", "", "service host label under project base")
+	domainFlag := fs.String("domain", "", "full service domain")
 	scopeFlags := defineDaemonScopeFlags(fs, false)
 	if handled, code := parseFlags(fs, "add", args, stdout, stderr); handled {
 		return code
@@ -293,23 +296,35 @@ func Add(args []string, stdout, stderr io.Writer) int {
 		return fail(stderr, *jsonOut, ExitUsage, "bad_scope", err.Error())
 	}
 	rest := fs.Args()
-	if len(rest) != 3 {
+	if len(rest) != 2 {
 		return usageFail(stderr, *jsonOut, "add")
+	}
+	if *hostFlag != "" && *domainFlag != "" {
+		return fail(stderr, *jsonOut, ExitUsage, "bad_service", "--host and --domain are mutually exclusive")
 	}
 	name := strings.TrimSpace(rest[0])
 	if err := validateRegistryName(name, "service"); err != nil {
 		return fail(stderr, *jsonOut, ExitUsage, "bad_service", err.Error())
 	}
-	domain := config.CanonicalDomain(rest[1])
-	if err := config.ValidateDomain(domain); err != nil {
-		return fail(stderr, *jsonOut, ExitUsage, "bad_domain", err.Error())
+	domain := config.CanonicalDomain(*domainFlag)
+	host := config.CanonicalHost(*hostFlag)
+	if domain != "" {
+		if err := config.ValidateDomain(domain); err != nil {
+			return fail(stderr, *jsonOut, ExitUsage, "bad_domain", err.Error())
+		}
 	}
-	p, err := strconv.Atoi(rest[2])
+	p, err := strconv.Atoi(rest[1])
 	if err != nil || p < 1 || p > 65535 {
 		return fail(stderr, *jsonOut, ExitUsage, "bad_port", "port must be 1-65535")
 	}
 
 	if sel.Scope.Kind == daemonScopeGlobal {
+		if host != "" {
+			return fail(stderr, *jsonOut, ExitUsage, "bad_service", "--host requires a project base")
+		}
+		if domain == "" {
+			return fail(stderr, *jsonOut, ExitUsage, "bad_domain", "--domain is required for global reservations")
+		}
 		res := registry.Reservation{Service: name, Domain: domain, Port: p, TLS: config.TLSInternal, Standalone: true}
 		res.Active = true
 		res.DNS = dns.ModeFor(domain, "")
@@ -324,8 +339,13 @@ func Add(args []string, stdout, stderr io.Writer) int {
 			return fail(stderr, *jsonOut, ExitError, "project", err.Error())
 		}
 	}
+	svc := config.Service{Domain: domain, Host: host, Port: p, TLS: config.TLSInternal}
+	resolvedDomain, err := resolveConfigServiceDomain(project, name, svc)
+	if err != nil {
+		return fail(stderr, *jsonOut, ExitUsage, "bad_service", err.Error())
+	}
 	res := registry.Reservation{
-		Project: project.Name, Service: name, Domain: domain, Port: p,
+		Project: project.Name, Service: name, Domain: resolvedDomain, Port: p,
 		TLS: config.TLSInternal, ConfigPath: path,
 	}
 	key := registry.Key(project.Name, name)
@@ -353,7 +373,7 @@ func Add(args []string, stdout, stderr io.Writer) int {
 	if err != nil {
 		return fail(stderr, *jsonOut, ExitError, "config", err.Error())
 	}
-	if err := config.UpsertService(path, name, config.Service{Domain: domain, Port: p, TLS: config.TLSInternal}); err != nil {
+	if err := config.UpsertService(path, name, svc); err != nil {
 		return fail(stderr, *jsonOut, ExitError, "config", err.Error())
 	}
 	err = registryStore().Update(func(r *registry.Registry) error { return r.Reserve(res) })
@@ -418,10 +438,30 @@ func Add(args []string, stdout, stderr io.Writer) int {
 		}
 	}
 	if *jsonOut {
-		return writeJSON(stdout, map[string]any{"project": project.Name, "service": res.Service, "domain": domain, "port": p, "reserved": true})
+		return writeJSON(stdout, map[string]any{"project": project.Name, "service": res.Service, "domain": resolvedDomain, "port": p, "reserved": true})
 	}
-	printSuccess(stdout, fmt.Sprintf("reserved %s/%s  %s -> :%d", project.Name, name, domain, p))
+	printSuccess(stdout, fmt.Sprintf("reserved %s/%s  %s -> :%d", project.Name, name, resolvedDomain, p))
 	return ExitOK
+}
+
+func resolveConfigServiceDomain(project *config.Project, name string, svc config.Service) (string, error) {
+	if project == nil {
+		return "", errors.New("current project is required")
+	}
+	next := &config.Project{
+		Name:     project.Name,
+		Base:     project.Base,
+		EnvFiles: append([]string{}, project.EnvFiles...),
+		Services: map[string]config.Service{},
+	}
+	for existingName, existingSvc := range project.Services {
+		next.Services[existingName] = existingSvc
+	}
+	next.Services[name] = svc
+	if err := next.Validate(); err != nil {
+		return "", err
+	}
+	return next.ServiceDomain(name)
 }
 
 func addStandalone(res registry.Reservation, stdout, stderr io.Writer, jsonOut bool) int {
@@ -981,7 +1021,99 @@ func Run(args []string, stdout, stderr io.Writer) int {
 	if lerr != nil {
 		return fail(stderr, false, lerr.Exit, lerr.Code, lerr.Message)
 	}
-	return port.Exec(res.Port, cmd[0], cmd[1:], os.Stdin, stdout, stderr)
+	env, err := runEnvForScope(sel)
+	if err != nil {
+		return fail(stderr, false, ExitError, "run_env", err.Error())
+	}
+	return port.Exec(res.Port, env, cmd[0], cmd[1:], os.Stdin, stdout, stderr)
+}
+
+func runEnvForScope(sel registryScopeSelection) ([]string, error) {
+	reg, err := registryStore().Read()
+	if err != nil {
+		return nil, err
+	}
+	reservations := reservationsForScope(reg, sel)
+	sort.Slice(reservations, func(i, j int) bool {
+		return reservations[i].Service < reservations[j].Service
+	})
+	env := map[string]string{}
+	resByService := map[string]registry.Reservation{}
+	for _, item := range reservations {
+		res := item.Reservation
+		if res.Port == 0 {
+			continue
+		}
+		key := config.EnvServiceKey(res.Service)
+		if existing, ok := env["GATE_"+key+"_PORT"]; ok {
+			return nil, fmt.Errorf("duplicate gate env service key %q for %s and port %s", key, res.Service, existing)
+		}
+		loopbackURL := fmt.Sprintf("http://127.0.0.1:%d", res.Port)
+		env["GATE_"+key+"_PORT"] = strconv.Itoa(res.Port)
+		env["GATE_"+key+"_URL"] = loopbackURL
+		env["GATE_"+key+"_ROUTE_URL"] = displayDomainURL(res.Domain)
+		resByService[res.Service] = res
+	}
+	project, hasProject, err := projectForRunEnv(sel, reservations)
+	if err != nil {
+		return nil, err
+	}
+	if hasProject {
+		for name, svc := range project.Services {
+			if len(svc.Env) == 0 {
+				continue
+			}
+			res, ok := resByService[name]
+			if !ok || res.Port == 0 {
+				return nil, fmt.Errorf("service %q publishes env names but has no reserved port", name)
+			}
+			loopbackURL := fmt.Sprintf("http://127.0.0.1:%d", res.Port)
+			for _, envName := range svc.Env {
+				env[envName] = loopbackURL
+			}
+		}
+	}
+	keys := make([]string, 0, len(env))
+	for key := range env {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	out := make([]string, 0, len(keys))
+	for _, key := range keys {
+		out = append(out, key+"="+env[key])
+	}
+	return out, nil
+}
+
+func projectForRunEnv(sel registryScopeSelection, reservations []projectReservation) (*config.Project, bool, error) {
+	if sel.Scope.Kind != daemonScopeProject {
+		return nil, false, nil
+	}
+	if sel.CurrentProject != nil {
+		return sel.CurrentProject, true, nil
+	}
+	if project, _, err := currentProjectPath(); err == nil && project.Name == sel.Scope.Name {
+		return project, true, nil
+	} else if err != nil && !errors.Is(err, config.ErrNotFound) {
+		return nil, false, err
+	}
+	for _, item := range reservations {
+		path := strings.TrimSpace(item.ConfigPath)
+		if path == "" {
+			continue
+		}
+		project, err := config.Load(path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return nil, false, err
+		}
+		if project.Name == sel.Scope.Name {
+			return project, true, nil
+		}
+	}
+	return nil, false, nil
 }
 
 func indexOf(ss []string, want string) int {

@@ -11,6 +11,7 @@ import (
 const withComments = `# top comment — keep me
 [project]
 name = "myapp"
+base = "myapp.localhost"
 
 [services.web]
 domain = "app.example.com" # inline note
@@ -63,6 +64,7 @@ func TestUpsertServicePreservesServiceCommentsAndExtraFields(t *testing.T) {
 	body := `# top
 [project]
 name = "myapp"
+base = "myapp.localhost"
 
 [services.web]
 # keep service comment
@@ -90,6 +92,43 @@ custom = "keep"
 	}
 	if _, err := Load(path); err != nil {
 		t.Fatalf("reparse: %v\n%s", err, s)
+	}
+}
+
+func TestUpsertServiceWritesHostAndRemovesDomain(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, Filename)
+	body := `# top
+[project]
+name = "myapp"
+base = "myapp.localhost"
+
+[services.web]
+domain = "old.example.com"
+port = 3000
+`
+	if err := os.WriteFile(path, []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertService(path, "web", Service{Host: "app", Port: 4312}); err != nil {
+		t.Fatalf("UpsertService: %v", err)
+	}
+	out, _ := os.ReadFile(path)
+	s := string(out)
+	if strings.Contains(s, `domain = "old.example.com"`) {
+		t.Fatalf("domain not removed:\n%s", s)
+	}
+	for _, want := range []string{`host = "app"`, "port = 4312"} {
+		if !strings.Contains(s, want) {
+			t.Fatalf("output missing %q:\n%s", want, s)
+		}
+	}
+	p, err := Load(path)
+	if err != nil {
+		t.Fatalf("reparse: %v\n%s", err, s)
+	}
+	if p.Services["web"].Domain != "app.myapp.localhost" {
+		t.Fatalf("domain = %q", p.Services["web"].Domain)
 	}
 }
 

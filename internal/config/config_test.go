@@ -24,13 +24,14 @@ func TestLoadValidAppliesDefaults(t *testing.T) {
 	writeFile(t, path, `
 [project]
 name = "myapp"
+base = "myapp.localhost"
 
 [services.web]
-domain = "app.example.com"
 
 [services.api]
 domain = "api.example.com"
 port = 3001
+env = ["API_URL", "INTERNAL_API_URL"]
 `)
 	p, err := Load(path)
 	if err != nil {
@@ -42,8 +43,17 @@ port = 3001
 	if p.Services["web"].TLS != TLSInternal {
 		t.Fatalf("web tls = %q, want internal default", p.Services["web"].TLS)
 	}
+	if p.Base != "myapp.localhost" {
+		t.Fatalf("base = %q", p.Base)
+	}
+	if p.Services["web"].Domain != "web.myapp.localhost" {
+		t.Fatalf("web domain = %q", p.Services["web"].Domain)
+	}
 	if p.Services["api"].Port != 3001 {
 		t.Fatalf("api port = %d", p.Services["api"].Port)
+	}
+	if got := p.Services["api"].Env; len(got) != 2 || got[0] != "API_URL" || got[1] != "INTERNAL_API_URL" {
+		t.Fatalf("api env = %#v", got)
 	}
 }
 
@@ -109,6 +119,65 @@ name = "demo"
 [services.web]
 domain = "web_gate.localhost"
 `,
+		"missing base and domain": `
+[project]
+name = "demo"
+
+[services.web]
+`,
+		"host without base": `
+[project]
+name = "demo"
+
+[services.web]
+host = "web"
+`,
+		"host plus domain": `
+[project]
+name = "demo"
+base = "demo.localhost"
+
+[services.web]
+host = "web"
+domain = "web.localhost"
+`,
+		"dotted host": `
+[project]
+name = "demo"
+base = "demo.localhost"
+
+[services.web]
+host = "api.v1"
+`,
+		"duplicate gate env key": `
+[project]
+name = "demo"
+base = "demo.localhost"
+
+[services.admin-web]
+
+[services.admin_web]
+host = "admin"
+`,
+		"reserved env prefix": `
+[project]
+name = "demo"
+base = "demo.localhost"
+
+[services.api]
+env = "GATE_API_URL"
+`,
+		"duplicate service env": `
+[project]
+name = "demo"
+base = "demo.localhost"
+
+[services.web]
+env = "API_URL"
+
+[services.api]
+env = "API_URL"
+`,
 		"unsupported acme tls": `
 [project]
 name = "demo"
@@ -143,6 +212,88 @@ tls = "bogus"
 				t.Fatal("expected error, got nil")
 			}
 		})
+	}
+}
+
+func TestLoadDerivesServiceDomainsFromBase(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, Filename)
+	writeFile(t, path, `
+[project]
+name = "demo"
+base = "local.example.com"
+
+[services.web]
+
+[services.api]
+host = "app"
+
+[services.root]
+host = "."
+`)
+	p, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if p.Services["web"].Domain != "web.local.example.com" {
+		t.Fatalf("web domain = %q", p.Services["web"].Domain)
+	}
+	if p.Services["api"].Domain != "app.local.example.com" {
+		t.Fatalf("api domain = %q", p.Services["api"].Domain)
+	}
+	if p.Services["root"].Domain != "local.example.com" {
+		t.Fatalf("root domain = %q", p.Services["root"].Domain)
+	}
+	if err := p.Validate(); err != nil {
+		t.Fatalf("loaded project should revalidate: %v", err)
+	}
+}
+
+func TestLoadExpandsBaseAndHostEnvReferences(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, Filename)
+	writeFile(t, filepath.Join(dir, ".env"), `
+BASE_DOMAIN=demo.localhost
+API_HOST=app
+`)
+	writeFile(t, path, `
+[project]
+name = "demo"
+env_files = [".env"]
+base = "${BASE_DOMAIN}"
+
+[services.api]
+host = "${API_HOST}"
+`)
+	p, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if p.Base != "demo.localhost" {
+		t.Fatalf("base = %q", p.Base)
+	}
+	if p.Services["api"].Domain != "app.demo.localhost" {
+		t.Fatalf("api domain = %q", p.Services["api"].Domain)
+	}
+}
+
+func TestLoadServiceEnvAcceptsString(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, Filename)
+	writeFile(t, path, `
+[project]
+name = "demo"
+base = "demo.localhost"
+
+[services.api]
+env = "API_URL"
+`)
+	p, err := Load(path)
+	if err != nil {
+		t.Fatalf("Load: %v", err)
+	}
+	if got := p.Services["api"].Env; len(got) != 1 || got[0] != "API_URL" {
+		t.Fatalf("env = %#v", got)
 	}
 }
 

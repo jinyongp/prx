@@ -36,7 +36,7 @@ var Specs = []CmdSpec{
 	{"down", "", "tear down scoped routes and keep reservations"},
 	{"expose", "<service> --via <provider> | ls | stop <service>", "publish, list, or stop external access"},
 	{"daemon", "status|start|stop|restart|logs", "control listener background proxy daemons"},
-	{"add", "<service> <domain> <port>", "reserve a port for a scoped service"},
+	{"add", "<service> <port>", "add or update a scoped service"},
 	{"rm", "<service>", "remove one scoped service reservation"},
 	{"clear", "", "remove all reservations in the selected scope"},
 	{"prune", "", "remove reservations whose project config no longer exists"},

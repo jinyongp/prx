@@ -137,7 +137,7 @@ func TestLsEmptyJSON(t *testing.T) {
 func TestLsPlainNoEscapes(t *testing.T) {
 	isolate(t)
 	var out, errb bytes.Buffer
-	if code := Add([]string{"web", "web.localhost", "4312"}, &out, &errb); code != ExitOK {
+	if code := Add([]string{"web", "4312", "--domain", "web.localhost"}, &out, &errb); code != ExitOK {
 		t.Fatalf("Add exit = %d, stderr=%s", code, errb.String())
 	}
 	out.Reset()

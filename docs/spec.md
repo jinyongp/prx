@@ -108,19 +108,22 @@ root, the user's home directory, or the filesystem root.
 ```toml
 [project]
 name = "myapp"
+base = "myapp.localhost"
 
 [services.web]
-domain = "app.localhost"
 
 [services.api]
-domain = "api.localhost"
 port = 3001
+env = "API_URL"
 ```
 
 ### Service
 
-A service maps one domain to one upstream port. If a service does not specify a
-port, gate allocates one from the default pool and stores the reservation.
+A service maps one resolved domain to one upstream port. With `project.base`,
+the default domain is `<service>.<base>`. `host = "."` maps a service to the
+bare base, `host = "app"` maps to `app.<base>`, and `domain` remains the
+full-domain escape hatch. If a service does not specify a port, gate allocates
+one from the default pool and stores the reservation.
 
 ### Reservation
 
@@ -162,7 +165,8 @@ local routing.
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
 | `name` | string | required | Stable project key used in registry ownership such as `myapp/web`. |
-| `env_files` | string array | empty | Dotenv files used only for environment interpolation in service fields. |
+| `base` | string | empty | Base domain used to derive service domains as `<service>.<base>`. |
+| `env_files` | string array | empty | Dotenv files used only for environment interpolation in project/service fields. |
 
 `env_files` entries are resolved relative to `gate.toml`. Missing files are
 ignored. Process environment values win over dotenv values, and earlier dotenv
@@ -172,20 +176,22 @@ files win over later ones.
 
 | Field | Type | Default | Meaning |
 | --- | --- | --- | --- |
-| `domain` | string | required | Hostname gate routes. Canonicalized as lowercase without trailing dot. |
+| `domain` | string | derived from base | Full hostname escape hatch. Canonicalized as lowercase without trailing dot. |
+| `host` | string | service name | Single host label under `project.base`; `.` means the bare base domain. |
 | `port` | integer or env string | auto-allocate | Local upstream port. `0` or omitted means allocate from the default pool. |
+| `env` | string or string array | empty | Env names that receive this service's loopback URL in child process environments. |
 
-`domain` and `port` can include environment references through `${NAME}` or
-`${NAME:-fallback}`. `${NAME}` is required and fails if unset. `${NAME:-fallback}`
-uses the fallback when the variable is unset or empty.
+`base`, `domain`, `host`, and `port` can include environment references through
+`${NAME}` or `${NAME:-fallback}`. `${NAME}` is required and fails if unset.
+`${NAME:-fallback}` uses the fallback when the variable is unset or empty.
 
 ```toml
 [project]
 name = "myapp"
 env_files = [".env.local", ".env"]
+base = "${BASE_DOMAIN:-myapp.localhost}"
 
 [services.web]
-domain = "${WEB_DOMAIN:-app.localhost}"
 port = "${WEB_PORT:-3000}"
 ```
 

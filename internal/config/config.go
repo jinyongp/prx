@@ -28,16 +28,21 @@ const (
 // ErrNotFound is returned by Discover when no gate.toml is found within bounds.
 var ErrNotFound = errors.New("gate.toml not found")
 
-// Service is a single domain → port mapping within a project.
+// Service is a single route → port mapping within a project. Domain is the
+// resolved domain after loading; Host is used when editing config before a
+// base-derived service has been resolved.
 type Service struct {
-	Domain string `toml:"domain"`
-	Port   int    `toml:"port,omitempty"` // 0 = auto-allocate
-	TLS    string `toml:"tls,omitempty"`  // internal only; omitted defaults to internal
+	Domain string   `toml:"domain"`
+	Host   string   `toml:"host,omitempty"`
+	Port   int      `toml:"port,omitempty"` // 0 = auto-allocate
+	TLS    string   `toml:"tls,omitempty"`  // internal only; omitted defaults to internal
+	Env    []string `toml:"env,omitempty"`
 }
 
 // Project is the decoded gate.toml.
 type Project struct {
 	Name     string
+	Base     string
 	EnvFiles []string
 	Services map[string]Service
 }
@@ -46,15 +51,18 @@ type Project struct {
 type file struct {
 	Project struct {
 		Name     string   `toml:"name"`
+		Base     string   `toml:"base"`
 		EnvFiles []string `toml:"env_files"`
 	} `toml:"project"`
 	Services map[string]rawService `toml:"services"`
 }
 
 type rawService struct {
-	Domain             string  `toml:"domain"`
+	Domain             *string `toml:"domain"`
+	Host               *string `toml:"host"`
 	Port               any     `toml:"port,omitempty"`
 	TLS                string  `toml:"tls,omitempty"`
+	Env                any     `toml:"env,omitempty"`
 	UnsupportedACMEDNS *string `toml:"acme_dns,omitempty"`
 }
 
@@ -78,16 +86,36 @@ func parse(path string, b []byte) (*Project, error) {
 	if err != nil {
 		return nil, err
 	}
-	p := &Project{Name: f.Project.Name, EnvFiles: f.Project.EnvFiles, Services: map[string]Service{}}
+	base, err := expandEnvRefs(f.Project.Base, env, "project base")
+	if err != nil {
+		return nil, err
+	}
+	p := &Project{Name: f.Project.Name, Base: CanonicalDomain(base), EnvFiles: f.Project.EnvFiles, Services: map[string]Service{}}
 	if p.Services == nil {
 		p.Services = map[string]Service{}
 	}
 	for name, raw := range f.Services {
-		domain, err := expandEnvRefs(raw.Domain, env, fmt.Sprintf("service %q domain", name))
+		domain := ""
+		if raw.Domain != nil {
+			domain, err = expandEnvRefs(*raw.Domain, env, fmt.Sprintf("service %q domain", name))
+			if err != nil {
+				return nil, err
+			}
+			domain = CanonicalDomain(domain)
+		}
+		host := ""
+		if raw.Host != nil {
+			host, err = expandEnvRefs(*raw.Host, env, fmt.Sprintf("service %q host", name))
+			if err != nil {
+				return nil, err
+			}
+			host = CanonicalHost(host)
+		}
+		port, err := parsePort(raw.Port, env, name)
 		if err != nil {
 			return nil, err
 		}
-		port, err := parsePort(raw.Port, env, name)
+		envNames, err := parseServiceEnv(raw.Env, name)
 		if err != nil {
 			return nil, err
 		}
@@ -96,17 +124,27 @@ func parse(path string, b []byte) (*Project, error) {
 		}
 		svc := Service{
 			Domain: domain,
+			Host:   host,
 			Port:   port,
 			TLS:    raw.TLS,
+			Env:    envNames,
 		}
 		if svc.TLS == "" {
 			svc.TLS = TLSInternal
 		}
-		svc.Domain = CanonicalDomain(svc.Domain)
 		p.Services[name] = svc
 	}
 	if err := p.Validate(); err != nil {
 		return nil, err
+	}
+	for name, svc := range p.Services {
+		domain, err := p.ServiceDomain(name)
+		if err != nil {
+			return nil, err
+		}
+		svc.Domain = domain
+		svc.Host = ""
+		p.Services[name] = svc
 	}
 	return p, nil
 }
@@ -232,6 +270,33 @@ func parsePort(raw any, env map[string]string, serviceName string) (int, error) 
 	}
 }
 
+func parseServiceEnv(raw any, serviceName string) ([]string, error) {
+	switch v := raw.(type) {
+	case nil:
+		return nil, nil
+	case string:
+		return []string{strings.TrimSpace(v)}, nil
+	case []any:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			s, ok := item.(string)
+			if !ok {
+				return nil, fmt.Errorf("service %q: env entries must be strings", serviceName)
+			}
+			out = append(out, strings.TrimSpace(s))
+		}
+		return out, nil
+	case []string:
+		out := make([]string, 0, len(v))
+		for _, item := range v {
+			out = append(out, strings.TrimSpace(item))
+		}
+		return out, nil
+	default:
+		return nil, fmt.Errorf("service %q: env must be a string or list of strings", serviceName)
+	}
+}
+
 func expandEnvRefs(value string, env map[string]string, context string) (string, error) {
 	var out strings.Builder
 	for {
@@ -276,6 +341,16 @@ func CanonicalDomain(domain string) string {
 	return strings.TrimSuffix(strings.ToLower(strings.TrimSpace(domain)), ".")
 }
 
+// CanonicalHost returns the case-insensitive service host label used for
+// base-derived domains.
+func CanonicalHost(host string) string {
+	host = strings.ToLower(strings.TrimSpace(host))
+	if host == "." {
+		return host
+	}
+	return strings.TrimSuffix(host, ".")
+}
+
 // ValidateDomain checks whether domain is a syntactically valid gate hostname.
 func ValidateDomain(domain string) error {
 	domain = CanonicalDomain(domain)
@@ -306,6 +381,59 @@ func validDomainLabel(label string) bool {
 	return true
 }
 
+// ServiceDomain returns the resolved route domain for service name.
+func (p *Project) ServiceDomain(name string) (string, error) {
+	svc, ok := p.Services[name]
+	if !ok {
+		return "", fmt.Errorf("service %q: not found", name)
+	}
+	if svc.Domain != "" {
+		domain := CanonicalDomain(svc.Domain)
+		if err := ValidateDomain(domain); err != nil {
+			return "", err
+		}
+		return domain, nil
+	}
+	base := CanonicalDomain(p.Base)
+	if base == "" {
+		return "", errors.New("domain is required when project base is not set")
+	}
+	host := svc.Host
+	if host == "" {
+		host = CanonicalHost(name)
+	}
+	if host == "." {
+		if err := ValidateDomain(base); err != nil {
+			return "", err
+		}
+		return base, nil
+	}
+	host = CanonicalHost(host)
+	if strings.Contains(host, ".") || !validDomainLabel(host) {
+		return "", fmt.Errorf("invalid host %q", host)
+	}
+	domain := host + "." + base
+	if err := ValidateDomain(domain); err != nil {
+		return "", err
+	}
+	return domain, nil
+}
+
+// EnvServiceKey returns the normalized service fragment used in gate-owned env
+// names, e.g. "admin-web" -> "ADMIN_WEB".
+func EnvServiceKey(name string) string {
+	name = strings.ToUpper(strings.TrimSpace(name))
+	var b strings.Builder
+	for _, r := range name {
+		if (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			b.WriteRune(r)
+			continue
+		}
+		b.WriteByte('_')
+	}
+	return b.String()
+}
+
 // Validate checks the project for structural and semantic errors.
 func (p *Project) Validate() error {
 	if strings.TrimSpace(p.Name) == "" {
@@ -314,6 +442,13 @@ func (p *Project) Validate() error {
 	if strings.Contains(p.Name, "/") {
 		return errors.New("project name must not contain /")
 	}
+	if p.Base != "" {
+		if err := ValidateDomain(p.Base); err != nil {
+			return fmt.Errorf("project base: %w", err)
+		}
+	}
+	envPublishers := map[string]string{}
+	envServiceKeys := map[string]string{}
 	for name, svc := range p.Services {
 		if strings.TrimSpace(name) == "" {
 			return errors.New("service name must not be empty")
@@ -324,7 +459,10 @@ func (p *Project) Validate() error {
 		if strings.Contains(name, "/") {
 			return fmt.Errorf("service %q: name must not contain /", name)
 		}
-		if err := ValidateDomain(svc.Domain); err != nil {
+		if svc.Domain != "" && svc.Host != "" {
+			return fmt.Errorf("service %q: host and domain are mutually exclusive", name)
+		}
+		if _, err := p.ServiceDomain(name); err != nil {
 			return fmt.Errorf("service %q: %w", name, err)
 		}
 		switch svc.TLS {
@@ -336,6 +474,24 @@ func (p *Project) Validate() error {
 		}
 		if svc.Port < 0 || svc.Port > 65535 {
 			return fmt.Errorf("service %q: port %d out of range", name, svc.Port)
+		}
+		envServiceKey := EnvServiceKey(name)
+		if prev, ok := envServiceKeys[envServiceKey]; ok {
+			return fmt.Errorf("services %q and %q derive the same gate env key %q", prev, name, envServiceKey)
+		}
+		envServiceKeys[envServiceKey] = name
+		for _, envName := range svc.Env {
+			envName = strings.TrimSpace(envName)
+			if !envKeyRe.MatchString(envName) {
+				return fmt.Errorf("service %q: invalid env name %q", name, envName)
+			}
+			if strings.HasPrefix(envName, "GATE_") {
+				return fmt.Errorf("service %q: env name %q uses reserved GATE_ prefix", name, envName)
+			}
+			if prev, ok := envPublishers[envName]; ok {
+				return fmt.Errorf("services %q and %q both publish env %q", prev, name, envName)
+			}
+			envPublishers[envName] = name
 		}
 	}
 	return nil

@@ -45,13 +45,13 @@ fi
 | `gate up [-d\|--daemon] [--dns localhost\|hosts] [-g\|--global] [-p name\|--project name] [--json]` | reserve current-project ports or activate scoped reservations |
 | `gate ls [--route active\|inactive] [--upstream live\|down] [-g\|--global] [-p name\|--project name] [-a\|--all] [--json]` | list scoped reservations with route/upstream status |
 | `gate port [-g\|--global] [-p name\|--project name] [-a\|--all] [service] [--json]` | print one scoped service port, or list reserved ports |
-| `gate run [-g\|--global] [-p name\|--project name] <service> -- <cmd...>` | run a command with `PORT` injected |
+| `gate run [-g\|--global] [-p name\|--project name] <service> -- <cmd...>` | run a command with `PORT` and peer service env injected |
 | `gate down [-g\|--global] [-p name\|--project name] [--json]` | deactivate scoped routes (reservations kept) |
 | `gate expose [--via <provider>] [--domain name.local] [--auth user:pass] [--no-auth] [-g\|--global] [-p name\|--project name] <service> [--json]` | reach a scoped service externally |
 | `gate expose ls [--via provider] [-g\|--global] [-p name\|--project name] [-a\|--all] [--json]` | list exposure records |
 | `gate expose stop [--via <provider>] [--force] [-g\|--global] [-p name\|--project name] <service> [--json]` | stop one exposure |
 | `gate daemon status [-a\|--all] [--json]` | inspect listener proxy status |
-| `gate add [-g\|--global] [-p name\|--project name] <service> <domain> <port> [--json]` | reserve a scoped service/name mapping |
+| `gate add [-g\|--global] [-p name\|--project name] [--host host] [--domain domain] <service> <port> [--json]` | reserve a scoped service/name mapping |
 | `gate rm [-g\|--global] [-p name\|--project name] <service> [--json]` | remove one scoped reservation |
 | `gate clear [-g\|--global] [-p name\|--project name] [-y\|--yes] [--json]` | remove all reservations in one scope |
 | `gate prune [--json]` | GC reservations whose gate.toml is gone |
@@ -87,7 +87,7 @@ Start a dev server on its assigned port:
 
 ```bash
 "$GATE_BIN" up
-"$GATE_BIN" run web -- pnpm dev   # PORT is injected
+"$GATE_BIN" run web -- pnpm dev   # PORT and peer service env are injected
 ```
 
 Get a port for a script:
@@ -120,29 +120,29 @@ JSON-mode errors are written to stderr:
 ```toml
 [project]
 name = "myapp"
+base = "myapp.localhost"
 
 [services.web]
-domain = "app.example.com"       # port omitted -> auto-allocated
 
 [services.api]
-domain = "api.example.com"
 port = 3001                      # fixed when needed
+env = "API_URL"                  # injected as http://127.0.0.1:<api-port>
 ```
 
-`domain` and `port` support environment interpolation:
+`base`, `domain`, `host`, and `port` support environment interpolation:
 
 ```toml
 [project]
 name = "myapp"
 env_files = [".env.local", ".env"]
+base = "${BASE_DOMAIN:-localhost}"
 
 [services.web]
-domain = "${WEB_DOMAIN:-app.localhost}"
 port = "${WEB_PORT:-3000}"
 
 [services.api]
-domain = "api.${BASE_DOMAIN:-localhost}"
 port = "${API_PORT}"
+env = "API_URL"
 ```
 
 `env_files` are resolved relative to `gate.toml`. Missing env files are ignored.
@@ -150,9 +150,11 @@ Process env overrides dotenv values; earlier env files override later env files.
 `${NAME}` is required and errors when unset. `${NAME:-default}` is optional and
 uses `default` when unset or empty.
 
-Inside a project, `gate add <service> <domain> <port>` and `gate rm <service>`
-edit this file in place, preserving comments. Outside a project the default
-scope is global; use `-g` explicitly when operating from inside a project.
+Inside a project, `gate add <service> <port>` derives the service domain from
+`[project] base`; use `--host` for a base label override or `--domain` for a
+full-domain escape hatch. `gate add` and `gate rm <service>` edit this file in
+place, preserving comments. Outside a project the default scope is global; use
+`-g` explicitly when operating from inside a project.
 `gate clear` removes scoped registry reservations and route/DNS state only; it
 does not edit `gate.toml`.
 Remove reservations by service/name. Use `gate clear -y` for whole-scope

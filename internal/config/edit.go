@@ -20,6 +20,7 @@ var serviceNameRe = regexp.MustCompile(`^[A-Za-z0-9_-]+$`)
 // so hand-written comments survive.
 func AddService(path, name string, svc Service) error {
 	svc.Domain = CanonicalDomain(svc.Domain)
+	svc.Host = CanonicalHost(svc.Host)
 	if svc.TLS == "" {
 		svc.TLS = TLSInternal
 	}
@@ -52,10 +53,11 @@ func AddService(path, name string, svc Service) error {
 // UpsertService adds or replaces the [services.<name>] table in gate.toml.
 func UpsertService(path, name string, svc Service) error {
 	svc.Domain = CanonicalDomain(svc.Domain)
+	svc.Host = CanonicalHost(svc.Host)
 	if svc.TLS == "" {
 		svc.TLS = TLSInternal
 	}
-	if err := validateService(name, svc); err != nil {
+	if err := ValidateServiceName(name); err != nil {
 		return err
 	}
 	b, err := os.ReadFile(path)
@@ -101,7 +103,7 @@ func RemoveService(path, name string) error {
 }
 
 func validateEdit(path, name string, svc Service) error {
-	if err := validateService(name, svc); err != nil {
+	if err := ValidateServiceName(name); err != nil {
 		return err
 	}
 	if b, err := os.ReadFile(path); err == nil {
@@ -116,18 +118,11 @@ func validateEdit(path, name string, svc Service) error {
 		_, err = parse(path, []byte(strings.Join(lines, "\n")+"\n"))
 		return err
 	}
-	return nil
-}
-
-func validateService(name string, svc Service) error {
-	if err := ValidateServiceName(name); err != nil {
-		return err
+	if svc.Domain == "" {
+		return fmt.Errorf("service %q: domain is required when creating a config without project base", name)
 	}
 	p := &Project{Name: "edit", Services: map[string]Service{name: svc}}
-	if err := p.Validate(); err != nil {
-		return err
-	}
-	return nil
+	return p.Validate()
 }
 
 func ValidateServiceName(name string) error {
@@ -151,12 +146,37 @@ func IsReservedServiceName(name string) bool {
 
 func upsertServiceBlock(block []string, svc Service) []string {
 	out := append([]string{}, block...)
-	out = upsertTomlScalar(out, "domain", fmt.Sprintf("%q", svc.Domain))
+	switch {
+	case svc.Domain != "":
+		out = removeTomlKey(out, "host")
+		out = upsertTomlScalar(out, "domain", fmt.Sprintf("%q", svc.Domain))
+	case svc.Host != "":
+		out = removeTomlKey(out, "domain")
+		out = upsertTomlScalar(out, "host", fmt.Sprintf("%q", svc.Host))
+	default:
+		out = removeTomlKey(removeTomlKey(out, "domain"), "host")
+	}
 	if svc.Port > 0 {
 		out = upsertTomlScalar(out, "port", fmt.Sprintf("%d", svc.Port))
 	}
 	if svc.TLS != "" && svc.TLS != TLSInternal {
 		out = upsertTomlScalar(out, "tls", fmt.Sprintf("%q", svc.TLS))
+	}
+	return out
+}
+
+func removeTomlKey(lines []string, key string) []string {
+	out := lines[:0]
+	prefix := key + " "
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, prefix) {
+			rest := strings.TrimSpace(strings.TrimPrefix(trimmed, prefix))
+			if strings.HasPrefix(rest, "=") {
+				continue
+			}
+		}
+		out = append(out, line)
 	}
 	return out
 }
@@ -181,14 +201,31 @@ func upsertTomlScalar(lines []string, key, value string) []string {
 func renderBlock(name string, svc Service) string {
 	var sb strings.Builder
 	fmt.Fprintf(&sb, "[services.%s]\n", name)
-	fmt.Fprintf(&sb, "domain = %q\n", svc.Domain)
+	if svc.Domain != "" {
+		fmt.Fprintf(&sb, "domain = %q\n", svc.Domain)
+	} else if svc.Host != "" {
+		fmt.Fprintf(&sb, "host = %q\n", svc.Host)
+	}
 	if svc.Port > 0 {
 		fmt.Fprintf(&sb, "port = %d\n", svc.Port)
+	}
+	if len(svc.Env) == 1 {
+		fmt.Fprintf(&sb, "env = %q\n", svc.Env[0])
+	} else if len(svc.Env) > 1 {
+		fmt.Fprintf(&sb, "env = [%s]\n", quoteStringList(svc.Env))
 	}
 	if svc.TLS != "" && svc.TLS != TLSInternal {
 		fmt.Fprintf(&sb, "tls = %q\n", svc.TLS)
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func quoteStringList(values []string) string {
+	parts := make([]string, 0, len(values))
+	for _, value := range values {
+		parts = append(parts, fmt.Sprintf("%q", value))
+	}
+	return strings.Join(parts, ", ")
 }
 
 // headerIndex returns the index of the `[services.<name>]` header line, or -1.
